@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Music Panes (Composite Pitch from Overlap)</title>
+  <style>
+    /* Full-window, no margins */
+    html, body {
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      background-color: black;
+    }
+    /* Place canvas above instructions */
+    canvas {
+      display: block;
+      position: relative;
+      z-index: 100;
+    }
+    /* Instructions behind canvas */
+    #info {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      color: #eee;
+      font-family: sans-serif;
+      background: rgba(0,0,0,0.5);
+      padding: 5px;
+      border-radius: 3px;
+      z-index: 10;
+    }
+    /* Slider styling */
+    .hue-slider {
+      position: absolute;
+      z-index: 200;
+      -webkit-appearance: none;
+      appearance: none;
+      width: 100%;
+      height: 8px;
+      background: #ddd;
+      outline: none;
+      border-radius: 4px;
+    }
+    .hue-slider::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 16px;
+      height: 16px;
+      background: #fff;
+      border: 2px solid #888;
+      border-radius: 50%;
+      cursor: pointer;
+    }
+    .hue-slider::-moz-range-thumb {
+      width: 16px;
+      height: 16px;
+      background: #fff;
+      border: 2px solid #888;
+      border-radius: 50%;
+      cursor: pointer;
+    }
+    /* Frequency input styling */
+    #freqInput {
+      position: absolute;
+      z-index: 300;
+      font-size: 16px;
+      padding: 2px;
+      border: 2px solid #888;
+      border-radius: 4px;
+      text-align: center;
+      width: 80px;
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <div id="info">
+    <p><strong>Music Panes (Composite Pitch from Overlap)</strong></p>
+    <p>
+      • Drag a pane to move it.<br>
+      • Drag its lower‑right corner to resize it.<br>
+      • Double‑click on empty space to add a new pane.<br>
+      • Double‑click on a pane to toggle its slider.<br>
+      • Right‑click on a pane to delete it.<br>
+      • Use Tab/Shift‑Tab to cycle through panes for frequency editing.
+    </p>
+    <p>
+      Overlapping panes now adjust so that their sound corresponds to the composite color (and thus pitch) of the overlap.
+    </p>
+    <p>(Click anywhere to start audio.)</p>
+  </div>
+  <canvas id="canvas"></canvas>
+  <!-- Global frequency input -->
+  <input type="text" id="freqInput">
+  <script>
+    // ----- Parameters for Frequency Mapping -----
+    // Frequency = 200 + (L/100)*800.
+    // Thus, L = ((frequency - 200)/800)*100.
+    function getFrequencyFromL(L) {
+      return 200 + (L / 100) * 800;
+    }
+
+    // ----- Mapping Presets -----
+    // Each preset defines low and high values for L and H.
+    // The slider (0–800) maps as:
+    //   L = L_low + (x/800)*(L_high - L_low)
+    //   H = H_low + (x/800)*(H_high - H_low)
+    const mappingPresets = [
+      { L_low: 20, L_high: 80, H_low: 240, H_high: 60 },   // Blue → Yellow
+      { L_low: 20, L_high: 80, H_low: 0,   H_high: 60 },    // Red → Yellow
+      { L_low: 15, L_high: 75, H_low: 270, H_high: 30 },    // Purple → Orange
+      { L_low: 25, L_high: 85, H_low: 120, H_high: 60 }     // Green → Yellow
+    ];
+    function randomMapping() {
+      return mappingPresets[Math.floor(Math.random() * mappingPresets.length)];
+    }
+    const sliderRange = 800;  // Slider from 0 to 800, step 0.1
+
+    // ----- Canvas Setup -----
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    window.addEventListener('resize', () => {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+    });
+
+    // ----- Web Audio API Setup -----
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    const audioCtx = new AudioContext();
+
+    // ----- Color Helper -----
+    function hslToCSS(hsl) {
+      return `hsl(${hsl.h}, ${hsl.s}%, ${hsl.l}%)`;
+    }
+
+    // ----- Global Variables for Pane Interaction -----
+    let panes = [];
+    let selectedPane = null;
+    let isDragging = false;
+    let dragOffsetX = 0, dragOffsetY = 0;
+    let resizing = false;
+    let resizeOffsetX = 0, resizeOffsetY = 0;
+    const resizeMargin = 10;
+    // For tab navigation, assign each pane a unique id.
+    let paneIdCounter = 0;
+
+    // ----- Pane Class -----
+    function Pane(x, y, width, height, mapping, sliderValue) {
+      this.id = paneIdCounter++;
+      this.x = x;
+      this.y = y;
+      this.width = width;
+      this.height = height;
+      this.mapping = mapping;
+      // Compute initial L and H from slider value.
+      let L = mapping.L_low + (sliderValue / sliderRange) * (mapping.L_high - mapping.L_low);
+      let H = mapping.H_low + (sliderValue / sliderRange) * (mapping.H_high - mapping.H_low);
+      this.hsl = { h: H, s: 100, l: L };
+      this.alpha = 0.5;
+      this.baseFrequency = getFrequencyFromL(L);
+      this.oscillator = audioCtx.createOscillator();
+      this.gainNode = audioCtx.createGain();
+      this.oscillator.type = 'sine';
+      this.oscillator.frequency.value = this.baseFrequency;
+      this.gainNode.gain.value = 0.05;
+      this.oscillator.connect(this.gainNode);
+      this.gainNode.connect(audioCtx.destination);
+      this.oscillator.start();
+      this.slider = null;
+    }
+
+    Pane.prototype.draw = function(ctx) {
+      ctx.fillStyle = hslToCSS(this.hsl);
+      ctx.globalAlpha = this.alpha;
+      ctx.fillRect(this.x, this.y, this.width, this.height);
+      ctx.fillStyle = "white";
+      ctx.font = "16px sans-serif";
+      let freq = this.oscillator.frequency.value;
+      ctx.fillText(freq.toFixed(2) + " Hz", this.x + 5, this.y + 20);
+    };
+
+    Pane.prototype.contains = function(x, y) {
+      return x >= this.x && x <= this.x + this.width &&
+             y >= this.y && y <= this.y + this.height;
+    };
+
+    // ----- Initial Panes -----
+    function initPanes() {
+      function randomRange(min, max) {
+        return min + Math.random() * (max - min);
+      }
+      for (let i = 0; i < 3; i++) {
+        let width = randomRange(100, 300);
+        let height = randomRange(100, 300);
+        let x = randomRange(0, canvas.width - width);
+        let y = randomRange(0, canvas.height - height);
+        let mapping = randomMapping();
+        let sliderValue = Math.random() * sliderRange;
+        panes.push(new Pane(x, y, width, height, mapping, sliderValue));
+      }
+    }
+    initPanes();
+
+    // ----- Frequency Input for Editing -----
+    const freqInput = document.getElementById('freqInput');
+    let editingPane = null;
+    function startEditing(pane) {
+      editingPane = pane;
+      freqInput.value = pane.oscillator.frequency.value.toFixed(2);
+      freqInput.style.display = 'block';
+      freqInput.style.left = (pane.x + 5) + "px";
+      freqInput.style.top = (pane.y + 5) + "px";
+      freqInput.focus();
+      freqInput.select();
+    }
+    function commitEditing() {
+      if (editingPane) {
+        let newFreq = parseFloat(freqInput.value);
+        if (!isNaN(newFreq)) {
+          // Invert the mapping: L = ((frequency - 200)/800)*100.
+          let newL = ((newFreq - 200) / 800) * 100;
+          // Clamp newL to the mapping preset range.
+          newL = Math.max(editingPane.mapping.L_low, Math.min(newL, editingPane.mapping.L_high));
+          let ratio = (newL - editingPane.mapping.L_low) / (editingPane.mapping.L_high - editingPane.mapping.L_low);
+          let newH = editingPane.mapping.H_low + ratio * (editingPane.mapping.H_high - editingPane.mapping.H_low);
+          editingPane.hsl.l = newL;
+          editingPane.hsl.h = newH;
+          editingPane.baseFrequency = getFrequencyFromL(newL);
+          if (editingPane.slider) {
+            let xVal = ((editingPane.hsl.l - editingPane.mapping.L_low) / (editingPane.mapping.L_high - editingPane.mapping.L_low)) * sliderRange;
+            editingPane.slider.value = xVal;
+          }
+        }
+        freqInput.style.display = 'none';
+        editingPane = null;
+      }
+    }
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && editingPane) {
+        commitEditing();
+      } else if (e.key === 'Tab') {
+        e.preventDefault();
+        let sorted = panes.slice().sort((a, b) => a.id - b.id);
+        if (!editingPane && sorted.length > 0) {
+          startEditing(sorted[0]);
+        } else if (editingPane) {
+          let idx = sorted.findIndex(p => p.id === editingPane.id);
+          commitEditing();
+          if (e.shiftKey) {
+            idx = (idx - 1 + sorted.length) % sorted.length;
+          } else {
+            idx = (idx + 1) % sorted.length;
+          }
+          startEditing(sorted[idx]);
+        }
+      }
+    });
+    canvas.addEventListener('click', (e) => {
+      const rect = canvas.getBoundingClientRect();
+      const mouseX = e.clientX - rect.left;
+      const mouseY = e.clientY - rect.top;
+      for (let i = panes.length - 1; i >= 0; i--) {
+        let pane = panes[i];
+        if (mouseX >= pane.x + 5 && mouseX <= pane.x + 105 &&
+            mouseY >= pane.y + 5 && mouseY <= pane.y + 30) {
+          startEditing(pane);
+          break;
+        }
+      }
+    });
+
+    // ----- Mouse Interaction for Drag/Resize (as before) -----
+    canvas.addEventListener('mousedown', (e) => {
+      if (audioCtx.state === 'suspended') { audioCtx.resume(); }
+      const rect = canvas.getBoundingClientRect();
+      const mouseX = e.clientX - rect.left;
+      const mouseY = e.clientY - rect.top;
+      for (let i = panes.length - 1; i >= 0; i--) {
+        let pane = panes[i];
+        if (pane.contains(mouseX, mouseY)) {
+          if (mouseX >= pane.x + pane.width - resizeMargin &&
+              mouseY >= pane.y + pane.height - resizeMargin) {
+            selectedPane = pane;
+            resizing = true;
+            resizeOffsetX = (pane.x + pane.width) - mouseX;
+            resizeOffsetY = (pane.y + pane.height) - mouseY;
+          } else {
+            selectedPane = pane;
+            isDragging = true;
+            dragOffsetX = mouseX - pane.x;
+            dragOffsetY = mouseY - pane.y;
+          }
+          panes.splice(i, 1);
+          panes.push(pane);
+          return;
+        }
+      }
+    });
+    canvas.addEventListener('mousemove', (e) => {
+      if (!selectedPane) return;
+      const rect = canvas.getBoundingClientRect();
+      const mouseX = e.clientX - rect.left;
+      const mouseY = e.clientY - rect.top;
+      if (resizing) {
+        let newWidth = mouseX - selectedPane.x + resizeOffsetX;
+        let newHeight = mouseY - selectedPane.y + resizeOffsetY;
+        selectedPane.width = Math.max(50, newWidth);
+        selectedPane.height = Math.max(50, newHeight);
+      } else if (isDragging) {
+        selectedPane.x = mouseX - dragOffsetX;
+        selectedPane.y = mouseY - dragOffsetY;
+      }
+    });
+    canvas.addEventListener('mouseup', () => {
+      selectedPane = null;
+      isDragging = false;
+      resizing = false;
+    });
+
+    // ----- Double-click Behavior (slider toggling / new pane creation) -----
+    canvas.addEventListener('dblclick', (e) => {
+      const rect = canvas.getBoundingClientRect();
+      const mouseX = e.clientX - rect.left;
+      const mouseY = e.clientY - rect.top;
+      let clickedPane = null;
+      for (let i = panes.length - 1; i >= 0; i--) {
+        let pane = panes[i];
+        if (pane.contains(mouseX, mouseY)) {
+          clickedPane = pane;
+          break;
+        }
+      }
+      if (clickedPane) {
+        toggleHueSlider(clickedPane);
+      } else {
+        function randomRange(min, max) { return min + Math.random() * (max - min); }
+        let width = randomRange(100, 300);
+        let height = randomRange(100, 300);
+        let x = Math.min(mouseX - width/2, canvas.width - width);
+        let y = Math.min(mouseY - height/2, canvas.height - height);
+        let mapping = randomMapping();
+        let sliderValue = Math.random() * sliderRange;
+        panes.push(new Pane(x, y, width, height, mapping, sliderValue));
+      }
+    });
+
+    // ----- Right-click to Delete -----
+    canvas.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      const rect = canvas.getBoundingClientRect();
+      const mouseX = e.clientX - rect.left;
+      const mouseY = e.clientY - rect.top;
+      for (let i = panes.length - 1; i >= 0; i--) {
+        let pane = panes[i];
+        if (pane.contains(mouseX, mouseY)) {
+          if (pane.slider) { document.body.removeChild(pane.slider); }
+          pane.oscillator.stop();
+          pane.oscillator.disconnect();
+          pane.gainNode.disconnect();
+          panes.splice(i, 1);
+          break;
+        }
+      }
+    });
+
+    // ----- Hue Slider Toggling -----
+    // The slider (range 0–800, step 0.1) controls:
+    //   L = mapping.L_low + (x/800)*(mapping.L_high - mapping.L_low)
+    //   H = mapping.H_low + (x/800)*(mapping.H_high - mapping.H_low)
+    function toggleHueSlider(pane) {
+      if (pane.slider) {
+        document.body.removeChild(pane.slider);
+        pane.slider = null;
+      } else {
+        const slider = document.createElement('input');
+        slider.type = 'range';
+        slider.min = 0;
+        slider.max = sliderRange;
+        slider.step = 0.1;
+        let xVal = ((pane.hsl.l - pane.mapping.L_low) / (pane.mapping.L_high - pane.mapping.L_low)) * sliderRange;
+        slider.value = xVal;
+        slider.className = 'hue-slider';
+        slider.style.left = pane.x + "px";
+        slider.style.top = (pane.y + pane.height + 5) + "px";
+        slider.style.width = pane.width + "px";
+        slider.addEventListener('input', () => {
+          let x = parseFloat(slider.value);
+          let newL = pane.mapping.L_low + (x / sliderRange) * (pane.mapping.L_high - pane.mapping.L_low);
+          let newH = pane.mapping.H_low + (x / sliderRange) * (pane.mapping.H_high - pane.mapping.H_low);
+          pane.hsl.l = newL;
+          pane.hsl.h = newH;
+          pane.baseFrequency = getFrequencyFromL(newL);
+        });
+        document.body.appendChild(slider);
+        pane.slider = slider;
+      }
+    }
+
+    // ----- Animation & Audio Update (Composite Pitch from Overlap) -----
+    function animate() {
+      requestAnimationFrame(animate);
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.fillStyle = 'black';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.globalCompositeOperation = 'lighter';
+      const currentTime = audioCtx.currentTime;
+      // For each pane, determine the set of panes that overlap it.
+      for (let i = 0; i < panes.length; i++) {
+        let pane = panes[i];
+        let group = [pane];
+        for (let j = 0; j < panes.length; j++) {
+          if (i === j) continue;
+          let other = panes[j];
+          // Simple check: if the intersection area is > 0, count as overlapping.
+          let interLeft = Math.max(pane.x, other.x);
+          let interTop = Math.max(pane.y, other.y);
+          let interRight = Math.min(pane.x + pane.width, other.x + other.width);
+          let interBottom = Math.min(pane.y + pane.height, other.y + other.height);
+          if (interRight > interLeft && interBottom > interTop) {
+            group.push(other);
+          }
+        }
+        // If group has more than one pane, compute composite frequency (average of base frequencies).
+        let compositeFreq = pane.baseFrequency;
+        if (group.length > 1) {
+          let sum = 0;
+          group.forEach(p => { sum += p.baseFrequency; });
+          compositeFreq = sum / group.length;
+        }
+        // Smoothly update the pane's oscillator frequency to the composite frequency.
+        pane.oscillator.frequency.setTargetAtTime(compositeFreq, currentTime, 0.05);
+        // Volume based on pane size.
+        const referenceArea = 30000;
+        let baseVolume = 0.05 * (pane.width * pane.height / referenceArea);
+        let clampedVolume = Math.min(baseVolume, 0.2);
+        pane.gainNode.gain.setValueAtTime(clampedVolume, currentTime);
+        pane.draw(ctx);
+        // Update slider position if active.
+        if (pane.slider) {
+          pane.slider.style.left = pane.x + "px";
+          pane.slider.style.top = (pane.y + pane.height + 5) + "px";
+          pane.slider.style.width = pane.width + "px";
+        }
+      }
+    }
+    animate();
+  </script>
+</body>
+</html>
+

@@ -17,7 +17,7 @@
       position: relative;
       z-index: 100;
     }
-    /* Instructions behind the canvas */
+    /* Instructions behind canvas */
     #info {
       position: absolute;
       top: 10px;
@@ -85,7 +85,7 @@
       • Use Tab/Shift‑Tab to cycle through panes for frequency editing.
     </p>
     <p>
-      Overlapping regions produce a composite pitch corresponding to their blended color. The volume of each sound is proportional to the visible area of that color.
+      Overlapping regions produce composite sound whose pitch corresponds to the blended color, and each region’s volume is proportional to its visible area.
     </p>
     <p>(Click anywhere to start audio.)</p>
   </div>
@@ -93,15 +93,14 @@
   <!-- Global frequency input for editing -->
   <input type="text" id="freqInput">
   <script>
-    // -------- Frequency Mapping --------
-    // Our mapping is: frequency = 200 + (L/100)*800.
-    // Inversion: L = ((frequency - 200)/800)*100.
+    // ----- Frequency Mapping -----
+    // Base mapping: frequency = 200 + (L/100)*800.
+    // Inversion: L = ((frequency - 200) / 800) * 100.
     function getFrequencyFromL(L) {
       return 200 + (L / 100) * 800;
     }
 
-    // -------- Mapping Presets --------
-    // Each preset defines low/high values for L and H.
+    // ----- Mapping Presets -----
     const mappingPresets = [
       { L_low: 20, L_high: 80, H_low: 240, H_high: 60 },   // Blue → Yellow
       { L_low: 20, L_high: 80, H_low: 0,   H_high: 60 },    // Red → Yellow
@@ -113,7 +112,7 @@
     }
     const sliderRange = 800;  // Slider range [0,800] with step 0.1
 
-    // -------- Canvas Setup --------
+    // ----- Canvas Setup -----
     const canvas = document.getElementById('canvas');
     const ctx = canvas.getContext('2d');
     canvas.width = window.innerWidth;
@@ -121,18 +120,19 @@
     window.addEventListener('resize', () => {
       canvas.width = window.innerWidth;
       canvas.height = window.innerHeight;
+      updateCellDimensions();
     });
 
-    // -------- Web Audio API Setup --------
+    // ----- Web Audio API Setup -----
     const AudioContext = window.AudioContext || window.webkitAudioContext;
     const audioCtx = new AudioContext();
 
-    // -------- Color Helper --------
+    // ----- Color Helper -----
     function hslToCSS(hsl) {
       return `hsl(${hsl.h}, ${hsl.s}%, ${hsl.l}%)`;
     }
 
-    // -------- Global Variables for Panes --------
+    // ----- Global Variables for Panes & Tab Navigation -----
     let panes = [];
     let selectedPane = null;
     let isDragging = false;
@@ -142,7 +142,7 @@
     const resizeMargin = 10;
     let paneIdCounter = 0;
 
-    // -------- Pane Class --------
+    // ----- Pane Class -----
     function Pane(x, y, width, height, mapping, sliderValue) {
       this.id = paneIdCounter++;
       this.x = x;
@@ -180,7 +180,7 @@
              y >= this.y && y <= this.y + this.height;
     };
 
-    // -------- Create Initial Panes (Random Size/Position) --------
+    // ----- Create Initial Panes (Random Size/Position) -----
     function initPanes() {
       function randomRange(min, max) { return min + Math.random() * (max - min); }
       for (let i = 0; i < 3; i++) {
@@ -195,7 +195,7 @@
     }
     initPanes();
 
-    // -------- Frequency Input for Editing --------
+    // ----- Frequency Input for Editing & Tab Navigation -----
     const freqInput = document.getElementById('freqInput');
     let editingPane = null;
     function startEditing(pane) {
@@ -257,7 +257,7 @@
       }
     });
 
-    // -------- Mouse Interaction for Drag/Resize --------
+    // ----- Mouse Interaction for Drag/Resize (as before) -----
     canvas.addEventListener('mousedown', (e) => {
       if (audioCtx.state === 'suspended') { audioCtx.resume(); }
       const rect = canvas.getBoundingClientRect();
@@ -305,7 +305,7 @@
       resizing = false;
     });
 
-    // -------- Double-click Behavior (slider toggling / new pane creation) --------
+    // ----- Double-click Behavior (slider toggling / new pane creation) -----
     canvas.addEventListener('dblclick', (e) => {
       const rect = canvas.getBoundingClientRect();
       const mouseX = e.clientX - rect.left;
@@ -332,7 +332,7 @@
       }
     });
 
-    // -------- Right-click to Delete --------
+    // ----- Right-click to Delete -----
     canvas.addEventListener('contextmenu', (e) => {
       e.preventDefault();
       const rect = canvas.getBoundingClientRect();
@@ -351,7 +351,7 @@
       }
     });
 
-    // -------- Hue Slider Toggling --------
+    // ----- Hue Slider Toggling -----
     // The slider (range 0–800, step 0.1) controls:
     //    L = mapping.L_low + (x/800)*(mapping.L_high - mapping.L_low)
     //    H = mapping.H_low + (x/800)*(mapping.H_high - mapping.H_low)
@@ -384,14 +384,9 @@
       }
     }
 
-    // -------- Composite Sound Sources --------
-    // We'll maintain a dictionary of composite oscillators keyed by a string
-    // representing the sorted list of pane ids that form that composite region.
-    let compositeOscillators = {};
-
-    // We'll use a sampling grid to estimate visible areas.
-    const sampleCountX = 50;
-    const sampleCountY = 50;
+    // ----- Composite Sound Calculation via Sampling -----
+    // We use a grid to sample the canvas and compute visible areas.
+    const sampleCountX = 50, sampleCountY = 50;
     let cellWidth, cellHeight, cellArea;
     function updateCellDimensions() {
       cellWidth = canvas.width / sampleCountX;
@@ -401,34 +396,33 @@
     updateCellDimensions();
     window.addEventListener('resize', updateCellDimensions);
 
-    // -------- Animation & Audio Update --------
+    // We'll use two objects to accumulate areas:
+    // individualVolumes: pane.id -> area (only when exactly one pane covers the cell)
+    // compositeVolumes: key (sorted pane ids, comma-separated) -> area (when 2+ panes overlap)
+    // The volume (and thus the gain) for each oscillator is proportional to its area relative to a reference.
+    // Also, for composite regions, the pitch is the average of the base frequencies.
+    let compositeOscillators = {};
+
+    // ----- Animation & Audio Update (Composite Pitch from Overlap) -----
     function animate() {
       requestAnimationFrame(animate);
-      // Clear canvas.
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.globalCompositeOperation = 'source-over';
       ctx.fillStyle = 'black';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
       ctx.globalCompositeOperation = 'lighter';
-
       const currentTime = audioCtx.currentTime;
-      // We'll compute visible areas via sampling.
-      // individualVolumes: pane.id -> area (for pane's visible portion)
+
+      // Initialize area accumulators.
       let individualVolumes = {};
-      // compositeVolumes: key (sorted pane ids joined by comma) -> area
+      panes.forEach(p => individualVolumes[p.id] = 0);
       let compositeVolumes = {};
 
-      // Initialize volumes.
-      panes.forEach(pane => {
-        individualVolumes[pane.id] = 0;
-      });
-
-      // For each sample cell, compute center and determine which panes cover that point.
+      // Sampling grid:
       for (let i = 0; i < sampleCountX; i++) {
         for (let j = 0; j < sampleCountY; j++) {
           let sampleX = (i + 0.5) * cellWidth;
           let sampleY = (j + 0.5) * cellHeight;
-          // Find all panes covering this sample.
           let covering = [];
           for (let pane of panes) {
             if (sampleX >= pane.x && sampleX <= pane.x + pane.width &&
@@ -436,56 +430,46 @@
               covering.push(pane);
             }
           }
-          if (covering.length > 0) {
-            // The top visible pane is the one with the highest index in 'panes' (last drawn).
-            let topPane = covering[covering.length - 1];
-            individualVolumes[topPane.id] += cellArea;
-            // If more than one pane covers this sample, record composite group.
-            if (covering.length >= 2) {
-              let ids = covering.map(p => p.id).sort((a, b) => a - b);
-              let key = ids.join(",");
-              if (!compositeVolumes[key]) compositeVolumes[key] = 0;
-              compositeVolumes[key] += cellArea;
-            }
+          if (covering.length === 1) {
+            individualVolumes[covering[0].id] += cellArea;
+          } else if (covering.length >= 2) {
+            let ids = covering.map(p => p.id).sort((a,b) => a-b);
+            let key = ids.join(",");
+            if (!compositeVolumes[key]) compositeVolumes[key] = 0;
+            compositeVolumes[key] += cellArea;
           }
         }
       }
+      // Reference area for volume scaling.
+      const referenceArea = 30000;
 
-      // Update individual pane volumes and frequencies.
-      const referenceArea = 30000; // adjust as desired.
-      for (let pane of panes) {
-        // Set individual volume proportional to its visible area.
+      // Update individual pane sounds.
+      panes.forEach(pane => {
         let vol = 0.05 * (individualVolumes[pane.id] / referenceArea);
         vol = Math.min(vol, 0.2);
         pane.gainNode.gain.setTargetAtTime(vol, currentTime, 0.05);
-        // Update individual oscillator frequency smoothly to baseFrequency.
         pane.oscillator.frequency.setTargetAtTime(pane.baseFrequency, currentTime, 0.05);
         pane.draw(ctx);
-        // Update slider position if active.
         if (pane.slider) {
           pane.slider.style.left = pane.x + "px";
           pane.slider.style.top = (pane.y + pane.height + 5) + "px";
           pane.slider.style.width = pane.width + "px";
         }
-      }
+      });
 
       // Update composite sound sources.
-      // For each composite group (with two or more panes):
       for (let key in compositeVolumes) {
         let area = compositeVolumes[key];
-        // Compute composite frequency as arithmetic mean of the base frequencies of panes in the group.
-        let ids = key.split(",").map(idStr => parseInt(idStr));
-        let sum = 0;
-        let count = 0;
+        let ids = key.split(",").map(Number);
+        let sumFreq = 0, count = 0;
         ids.forEach(id => {
           let pane = panes.find(p => p.id === id);
-          if (pane) { sum += pane.baseFrequency; count++; }
+          if (pane) { sumFreq += pane.baseFrequency; count++; }
         });
-        let compFreq = (count > 0) ? (sum / count) : 0;
-        // Volume proportional to composite area.
+        let compFreq = count > 0 ? (sumFreq / count) : 0;
         let compVol = 0.05 * (area / referenceArea);
         compVol = Math.min(compVol, 0.2);
-        // If oscillator for this composite group doesn't exist, create it.
+        // If oscillator for composite group doesn't exist, create it.
         if (!compositeOscillators[key]) {
           let osc = audioCtx.createOscillator();
           let gain = audioCtx.createGain();
@@ -497,13 +481,12 @@
           osc.start();
           compositeOscillators[key] = { osc, gain };
         } else {
-          // Update existing oscillator.
           let comp = compositeOscillators[key];
           comp.osc.frequency.setTargetAtTime(compFreq, currentTime, 0.05);
           comp.gain.gain.setTargetAtTime(compVol, currentTime, 0.05);
         }
       }
-      // Remove any composite oscillators that are no longer needed.
+      // Remove composite oscillators for groups no longer present.
       for (let key in compositeOscillators) {
         if (!(key in compositeVolumes)) {
           compositeOscillators[key].osc.stop();
@@ -512,8 +495,6 @@
           delete compositeOscillators[key];
         }
       }
-      
-      // ----- Perfect Fifth detection removed -----
     }
     animate();
   </script>

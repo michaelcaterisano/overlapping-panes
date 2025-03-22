@@ -87,33 +87,23 @@
       function hslToRgb(h, s, l) {
         s /= 100;
         l /= 100;
-        let c = (1 - Math.abs(2 * l - 1)) * s;
-        let hh = h / 60;
-        let x = c * (1 - Math.abs((hh % 2) - 1));
-        let r = 0,
-          g = 0,
-          b = 0;
-        if (hh < 1) {
-          r = c;
-          g = x;
-        } else if (hh < 2) {
-          r = x;
-          g = c;
-        } else if (hh < 3) {
-          g = c;
-          b = x;
-        } else if (hh < 4) {
-          g = x;
-          b = c;
-        } else if (hh < 5) {
-          r = x;
-          b = c;
-        } else {
-          r = c;
-          b = x;
-        }
-        let m = l - c / 2;
-        return { r: r + m, g: g + m, b: b + m };
+        const c = (1 - Math.abs(2 * l - 1)) * s;
+        const x = c * (1 - Math.abs((h / 60) % 2 - 1));
+        const m = l - c/2;
+        let r, g, b;
+        
+        if (h < 60) { [r, g, b] = [c, x, 0]; }
+        else if (h < 120) { [r, g, b] = [x, c, 0]; }
+        else if (h < 180) { [r, g, b] = [0, c, x]; }
+        else if (h < 240) { [r, g, b] = [0, x, c]; }
+        else if (h < 300) { [r, g, b] = [x, 0, c]; }
+        else { [r, g, b] = [c, 0, x]; }
+        
+        return [
+          Math.round((r + m) * 255),
+          Math.round((g + m) * 255), 
+          Math.round((b + m) * 255)
+        ];
       }
 
       // For each pane, convert its HSL to an RGB color in [0..1].
@@ -795,6 +785,39 @@
         }
       }
       animate();
+
+      // -------------------- Color Space Conversion Functions --------------------
+      function rgbToLab(r, g, b) {
+        // First convert RGB to XYZ
+        r /= 255; g /= 255; b /= 255;
+        
+        // Assume sRGB
+        r = r > 0.04045 ? Math.pow((r + 0.055) / 1.055, 2.4) : r / 12.92;
+        g = g > 0.04045 ? Math.pow((g + 0.055) / 1.055, 2.4) : g / 12.92;
+        b = b > 0.04045 ? Math.pow((b + 0.055) / 1.055, 2.4) : b / 12.92;
+        
+        // Convert to XYZ
+        const x = r * 0.4124564 + g * 0.3575761 + b * 0.1804375;
+        const y = r * 0.2126729 + g * 0.7151522 + b * 0.0721750;
+        const z = r * 0.0193339 + g * 0.1191920 + b * 0.9503041;
+        
+        // Convert XYZ to Lab
+        const xn = 0.95047, yn = 1.0, zn = 1.08883;
+        const fx = x > 0.008856 ? Math.pow(x/xn, 1/3) : (7.787 * x/xn) + 16/116;
+        const fy = y > 0.008856 ? Math.pow(y/yn, 1/3) : (7.787 * y/yn) + 16/116;
+        const fz = z > 0.008856 ? Math.pow(z/zn, 1/3) : (7.787 * z/zn) + 16/116;
+        
+        return [
+          (116 * fy) - 16,    // L
+          500 * (fx - fy),    // a
+          200 * (fy - fz)     // b
+        ];
+      }
+
+      function hslToLab(h, s, l) {
+        const [r, g, b] = hslToRgb(h, s, l);
+        return rgbToLab(r, g, b);
+      }
     </script>
   </body>
 </html>

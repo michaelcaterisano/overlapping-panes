@@ -431,7 +431,7 @@
             if (p.slider) document.body.removeChild(p.slider);
             // Important! Setting a scheduled parameter value
             p.gainNode.gain.setValueAtTime(
-              gainNode.gain.value,
+              p.gainNode.gain.value,
               audioCtx.currentTime
             );
 
@@ -439,9 +439,13 @@
               0.0001,
               audioCtx.currentTime + 0.03
             );
-            p.oscillator.stop();
-            p.oscillator.disconnect();
-            p.gainNode.disconnect();
+
+            setTimeout(() => {
+              p.oscillator.stop();
+              p.oscillator.disconnect();
+              p.gainNode.disconnect();
+            }, 500);
+
             panes.splice(i, 1);
             break;
           }
@@ -503,9 +507,22 @@
               let p = panes[i];
               if (p.contains(touchX, touchY)) {
                 if (p.slider) document.body.removeChild(p.slider);
-                p.oscillator.stop();
-                p.oscillator.disconnect();
-                p.gainNode.disconnect();
+                p.gainNode.gain.setValueAtTime(
+                  p.gainNode.gain.value,
+                  audioCtx.currentTime
+                );
+
+                p.gainNode.gain.exponentialRampToValueAtTime(
+                  0.0001,
+                  audioCtx.currentTime + 0.03
+                );
+
+                setTimeout(() => {
+                  p.oscillator.stop();
+                  p.oscillator.disconnect();
+                  p.gainNode.disconnect();
+                }, 500);
+
                 panes.splice(i, 1);
                 break;
               }

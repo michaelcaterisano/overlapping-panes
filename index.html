@@ -784,10 +784,23 @@
         // remove composite oscillators not present
         for (let key in compositeOscillators) {
           if (!(key in compositeRegions)) {
-            compositeOscillators[key].osc.stop();
-            compositeOscillators[key].osc.disconnect();
-            compositeOscillators[key].gain.disconnect();
-            delete compositeOscillators[key];
+            let compOsc = compositeOscillators[key];
+            compOsc.gain.gain.cancelScheduledValues(currentTime);
+            // Set the current gain value (ensure it's nonzero)
+            let currentGain =
+              compOsc.gain.gain.value > 0 ? compOsc.gain.gain.value : 0.0001;
+            compOsc.gain.gain.setValueAtTime(currentGain, currentTime);
+            // Ramp down the gain exponentially to a small nonzero value over 50ms
+            compOsc.gain.gain.exponentialRampToValueAtTime(
+              0.0001,
+              currentTime + 0.05
+            );
+            setTimeout(() => {
+              compOsc.osc.stop();
+              compOsc.osc.disconnect();
+              compOsc.gain.disconnect();
+              delete compositeOscillators[key];
+            }, 50);
           }
         }
       }

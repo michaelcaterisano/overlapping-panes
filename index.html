@@ -429,10 +429,7 @@
           let p = panes[i];
           if (p.contains(mouseX, mouseY)) {
             if (p.slider) document.body.removeChild(p.slider);
-            p.gainNode.gain.exponentialRampToValueAtTime(
-              0.01,
-              audioCtx.currentTime + 0.3
-            );
+            p.gainNode.gain.setTargetAtTime(0, audioCtx.currentTime, 0.015);
             // setTimeout(() => {
             //   p.oscillator.stop();
             //   p.oscillator.disconnect();

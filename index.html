@@ -741,16 +741,22 @@
             let gain = audioCtx.createGain();
             osc.type = "sine";
             osc.frequency.value = compFreq;
-            gain.gain.value = compVol;
+            // Start with a minimal gain to avoid a click
+            gain.gain.value = 0.0001;
             osc.connect(gain);
             gain.connect(audioCtx.destination);
             osc.start();
+            // Schedule an exponential ramp from 0.0001 up to compVol over 50ms
+            gain.gain.cancelScheduledValues(currentTime);
+            gain.gain.setValueAtTime(0.0001, currentTime);
+            gain.gain.exponentialRampToValueAtTime(compVol, currentTime + 0.05);
             compositeOscillators[key] = { osc, gain };
           } else {
             let c = compositeOscillators[key];
             c.osc.frequency.setTargetAtTime(compFreq, currentTime, 0.05);
             c.gain.gain.setTargetAtTime(compVol, currentTime, 0.05);
           }
+
           let centroidX = region.sumX / area,
             centroidY = region.sumY / area;
           ctx.fillStyle = "white";

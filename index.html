@@ -429,12 +429,19 @@
           let p = panes[i];
           if (p.contains(mouseX, mouseY)) {
             if (p.slider) document.body.removeChild(p.slider);
-            p.gainNode.gain.setTargetAtTime(0, audioCtx.currentTime, 0.015);
-            // setTimeout(() => {
-            //   p.oscillator.stop();
-            //   p.oscillator.disconnect();
-            //   p.gainNode.disconnect();
-            // }, 310);
+            // Important! Setting a scheduled parameter value
+            p.gainNode.gain.setValueAtTime(
+              gainNode.gain.value,
+              audioCtx.currentTime
+            );
+
+            p.gainNode.gain.exponentialRampToValueAtTime(
+              0.0001,
+              audioCtx.currentTime + 0.03
+            );
+            p.oscillator.stop();
+            p.oscillator.disconnect();
+            p.gainNode.disconnect();
             panes.splice(i, 1);
             break;
           }

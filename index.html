@@ -123,7 +123,11 @@
     let dragOffsetX = 0, dragOffsetY = 0;
     let resizing = false;
     let resizeOffsetX = 0, resizeOffsetY = 0;
-    const resizeMargin = 10;
+    // Increase the resize margin for mobile: default 10, but if touch is supported, use 30.
+    let resizeMargin = 10;
+    if ('ontouchstart' in window || navigator.maxTouchPoints > 0) {
+      resizeMargin = 30;
+    }
     let paneIdCounter = 0;
 
     // ----- Pane Class -----
@@ -150,7 +154,7 @@
       this.oscillator.start();
       this.slider = null;
     }
-    // Draw: only display frequency if visible area > threshold.
+    // Draw: only display frequency text if the pane is partly visible.
     Pane.prototype.draw = function(ctx, visibleArea) {
       ctx.fillStyle = hslToCSS(this.hsl);
       ctx.globalAlpha = this.alpha;
@@ -170,7 +174,7 @@
     // ----- Create Initial Panes (Random Size/Position) -----
     function initPanes() {
       function randomRange(min, max) { return min + Math.random() * (max - min); }
-      for (let i = 0; i < 3; i++) {
+      for (let i = 0; i < 2; i++) {
         let width = randomRange(100, 300);
         let height = randomRange(100, 300);
         let x = randomRange(0, canvas.width - width);
@@ -383,6 +387,8 @@
     const longPressDuration = 800; // ms for deletion on mobile
     canvas.addEventListener('touchstart', (e) => {
       e.preventDefault();
+      // Start the audio context immediately if suspended.
+      if (audioCtx.state === 'suspended') { audioCtx.resume(); }
       const touch = e.touches[0];
       const rect = canvas.getBoundingClientRect();
       const touchX = touch.clientX - rect.left;
@@ -416,7 +422,8 @@
             clearTimeout(longPressTimeout);
             toggleHueSlider(pane);
           } else {
-            if (touchX >= pane.x + pane.width - 20 && touchY >= pane.y + pane.height - 20) {
+            // Check if touch is near bottom-right (using mobile resizeMargin)
+            if (touchX >= pane.x + pane.width - 30 && touchY >= pane.y + pane.height - 30) {
               selectedPane = pane;
               resizing = true;
               resizeOffsetX = (pane.x + pane.width) - touchX;

@@ -175,8 +175,8 @@
     function initPanes() {
       function randomRange(min, max) { return min + Math.random() * (max - min); }
       for (let i = 0; i < 2; i++) {
-        let width = randomRange(100, 300);
-        let height = randomRange(100, 300);
+        let width = randomRange(300, 800);
+        let height = randomRange(300, 800);
         let x = randomRange(0, canvas.width - width);
         let y = randomRange(0, canvas.height - height);
         let mapping = randomMapping();

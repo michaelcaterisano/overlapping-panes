@@ -399,13 +399,11 @@
         for (let i = panes.length - 1; i >= 0; i--) {
           let pane = panes[i];
           if (pane.contains(touchX, touchY)) {
-            if (confirm("Delete pane?")) {
-              if (pane.slider) { document.body.removeChild(pane.slider); }
-              pane.oscillator.stop();
-              pane.oscillator.disconnect();
-              pane.gainNode.disconnect();
-              panes.splice(i, 1);
-            }
+            if (pane.slider) { document.body.removeChild(pane.slider); }
+            pane.oscillator.stop();
+            pane.oscillator.disconnect();
+            pane.gainNode.disconnect();
+            panes.splice(i, 1);
             break;
           }
         }

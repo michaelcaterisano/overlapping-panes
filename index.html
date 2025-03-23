@@ -414,22 +414,18 @@
           let p = panes[i];
           if (p.contains(mouseX, mouseY)) {
             if (p.slider) document.body.removeChild(p.slider);
-            // Important! Setting a scheduled parameter value
-            p.gainNode.gain.setValueAtTime(
-              p.gainNode.gain.value,
-              audioCtx.currentTime
-            );
-
-            p.gainNode.gain.exponentialRampToValueAtTime(
-              0.0001,
-              audioCtx.currentTime + 0.03
-            );
-
+            
+            // Immediately disconnect after a quick fade
+            const currentTime = audioCtx.currentTime;
+            p.gainNode.gain.cancelScheduledValues(currentTime);
+            p.gainNode.gain.setValueAtTime(p.gainNode.gain.value, currentTime);
+            p.gainNode.gain.exponentialRampToValueAtTime(0.0001, currentTime + 0.05);
+            
             setTimeout(() => {
               p.oscillator.stop();
               p.oscillator.disconnect();
               p.gainNode.disconnect();
-            }, 500);
+            }, 60); // Reduced from 500ms to 60ms to match the ramp
 
             panes.splice(i, 1);
             break;
@@ -808,22 +804,23 @@
         for (let key in compositeOscillators) {
           if (!(key in compositeRegions)) {
             let compOsc = compositeOscillators[key];
+            const currentTime = audioCtx.currentTime;
+            
+            // Cancel any scheduled values
             compOsc.gain.gain.cancelScheduledValues(currentTime);
-            // Set the current gain value (ensure it's nonzero)
-            let currentGain =
-              compOsc.gain.gain.value > 0 ? compOsc.gain.gain.value : 0.0001;
-            compOsc.gain.gain.setValueAtTime(currentGain, currentTime);
-            // Ramp down the gain exponentially to a small nonzero value over 50ms
-            compOsc.gain.gain.exponentialRampToValueAtTime(
-              0.0001,
-              currentTime + 0.05
+            compOsc.gain.gain.setValueAtTime(
+              Math.max(0.0001, compOsc.gain.gain.value),
+              currentTime
             );
+            compOsc.gain.gain.exponentialRampToValueAtTime(0.0001, currentTime + 0.05);
+            
+            // Clean up immediately after the fade
             setTimeout(() => {
               compOsc.osc.stop();
               compOsc.osc.disconnect();
               compOsc.gain.disconnect();
               delete compositeOscillators[key];
-            }, 50);
+            }, 60); // Reduced from 500ms to 60ms to match the ramp
           }
         }
       }

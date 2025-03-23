@@ -2,14 +2,14 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <title>Music Panes (Screen Blend Overlap & Perfect Fifth Detection)</title>
+    <title>Music Panes (Simplified OO)</title>
     <style>
       html,
       body {
         margin: 0;
         padding: 0;
         overflow: hidden;
-        background-color: black;
+        background: black;
       }
       canvas {
         display: block;
@@ -27,16 +27,7 @@
         outline: none;
         border-radius: 4px;
       }
-      .hue-slider::-webkit-slider-thumb {
-        -webkit-appearance: none;
-        appearance: none;
-        width: 16px;
-        height: 16px;
-        background: #fff;
-        border: 2px solid #888;
-        border-radius: 50%;
-        cursor: pointer;
-      }
+      .hue-slider::-webkit-slider-thumb,
       .hue-slider::-moz-range-thumb {
         width: 16px;
         height: 16px;
@@ -44,6 +35,16 @@
         border: 2px solid #888;
         border-radius: 50%;
         cursor: pointer;
+      }
+      @media (any-pointer: coarse) {
+        .hue-slider {
+          height: 16px;
+        }
+        .hue-slider::-webkit-slider-thumb,
+        .hue-slider::-moz-range-thumb {
+          width: 24px;
+          height: 24px;
+        }
       }
       #freqInput {
         position: absolute;
@@ -56,314 +57,264 @@
         width: 80px;
         display: none;
       }
-      @media (any-pointer: coarse) {
-        .hue-slider {
-          height: 16px;
-        }
-        .hue-slider::-webkit-slider-thumb {
-          width: 24px;
-          height: 24px;
-        }
-        .hue-slider::-moz-range-thumb {
-          width: 24px;
-          height: 24px;
-        }
-      }
     </style>
   </head>
   <body>
     <canvas id="canvas"></canvas>
-    <!-- Frequency input for click-based editing only -->
     <input type="text" id="freqInput" />
-
     <script>
-      // -------------------- Frequency & Color Helpers --------------------
-      // Map L from actual range [30..90] to freq in [100..1000].
-      function getFrequencyFromLabL(labL) {
-        // Normalize L from [30..90] to [0..1]
-        const normalizedL = (labL - 30) / (90 - 30);
-        // Map [0..1] to [100..1000]
-        return 100 + normalizedL * 900;
-      }
-
-      // Convert an HSL color (h in [0..360], s,l in [0..100]) to RGB [0..1].
+      // ---- Utility Functions ----
+      const getFrequencyFromLabL = (L) => 100 + ((L - 30) / 60) * 900;
       function hslToRgb(h, s, l) {
         s /= 100;
         l /= 100;
-        const c = (1 - Math.abs(2 * l - 1)) * s;
-        const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
-        const m = l - c / 2;
+        const c = (1 - Math.abs(2 * l - 1)) * s,
+          x = c * (1 - Math.abs(((h / 60) % 2) - 1)),
+          m = l - c / 2;
         let r, g, b;
-
-        if (h < 60) {
-          [r, g, b] = [c, x, 0];
-        } else if (h < 120) {
-          [r, g, b] = [x, c, 0];
-        } else if (h < 180) {
-          [r, g, b] = [0, c, x];
-        } else if (h < 240) {
-          [r, g, b] = [0, x, c];
-        } else if (h < 300) {
-          [r, g, b] = [x, 0, c];
-        } else {
-          [r, g, b] = [c, 0, x];
-        }
-
+        if (h < 60) [r, g, b] = [c, x, 0];
+        else if (h < 120) [r, g, b] = [x, c, 0];
+        else if (h < 180) [r, g, b] = [0, c, x];
+        else if (h < 240) [r, g, b] = [0, x, c];
+        else if (h < 300) [r, g, b] = [x, 0, c];
+        else [r, g, b] = [c, 0, x];
         return [
           Math.round((r + m) * 255),
           Math.round((g + m) * 255),
           Math.round((b + m) * 255),
         ];
       }
-
-      // "screen" blend formula: out = 1 - (1 - A)*(1 - B)
-      function screenChannel(a, b) {
-        return 1 - (1 - a) * (1 - b);
+      function rgbToLab(r, g, b) {
+        [r, g, b] = [r, g, b].map((v) => v / 255);
+        r = r > 0.04045 ? Math.pow((r + 0.055) / 1.055, 2.4) : r / 12.92;
+        g = g > 0.04045 ? Math.pow((g + 0.055) / 1.055, 2.4) : g / 12.92;
+        b = b > 0.04045 ? Math.pow((b + 0.055) / 1.055, 2.4) : b / 12.92;
+        const x = r * 0.4124564 + g * 0.3575761 + b * 0.1804375,
+          y = r * 0.2126729 + g * 0.7151522 + b * 0.072175,
+          z = r * 0.0193339 + g * 0.119192 + b * 0.9503041,
+          xn = 0.95047,
+          yn = 1,
+          zn = 1.08883;
+        const fx =
+            x > 0.008856
+              ? Math.pow(x / xn, 1 / 3)
+              : (7.787 * x) / xn + 16 / 116,
+          fy =
+            y > 0.008856
+              ? Math.pow(y / yn, 1 / 3)
+              : (7.787 * y) / yn + 16 / 116,
+          fz =
+            z > 0.008856
+              ? Math.pow(z / zn, 1 / 3)
+              : (7.787 * z) / zn + 16 / 116;
+        return [116 * fy - 16, 500 * (fx - fy), 200 * (fy - fz)];
       }
+      const screenChannel = (a, b) => 1 - (1 - a) * (1 - b);
 
-      // Screen-blend a list of pane colors (in RGB [0..1]), starting from black => final color.
-      function screenBlendColors(panes) {
-        let R = 0,
-          G = 0,
-          B = 0;
-        for (let p of panes) {
-          let { r, g, b } = p.rgb;
-          R = screenChannel(R, r);
-          G = screenChannel(G, g);
-          B = screenChannel(B, b);
-        }
-        return { r: R, g: G, b: B };
-      }
-
-      // Convert an RGB color in [0..1] to HSL => {h in deg, s,l in [0..100]}.
-      function rgbToHsl(r, g, b) {
-        let max = Math.max(r, g, b),
-          min = Math.min(r, g, b);
-        let h,
-          s,
-          l = (max + min) / 2;
-        if (max === min) {
-          h = 0;
-          s = 0;
-        } else {
-          let d = max - min;
-          s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
-          if (max === r) {
-            h = (g - b) / d + (g < b ? 6 : 0);
-          } else if (max === g) {
-            h = (b - r) / d + 2;
-          } else {
-            h = (r - g) / d + 4;
-          }
-          h *= 60;
-        }
-        return { h, s: s * 100, l: l * 100 };
-      }
-
-      // -------------------- Mapping Presets --------------------
-      const mappingPresets = [
-        { H_low: 240, H_high: 600 }, // Blue to Blue (wraps around)
-        // { H_low: 180, H_high: 540 }, // Cyan to Cyan
-        // { H_low: 0, H_high: 360 }, // Red to Red
-        // { H_low: 120, H_high: 480 }, // Green to Green
-      ];
-      function randomMapping() {
-        return mappingPresets[
-          Math.floor(Math.random() * mappingPresets.length)
-        ];
-      }
+      // ---- Mapping & Global Constants ----
+      const mappingPresets = [{ H_low: 240, H_high: 600 }];
+      const randomMapping = () =>
+        mappingPresets[Math.floor(Math.random() * mappingPresets.length)];
       const sliderRange = 800;
 
-      // -------------------- Canvas & Audio Setup --------------------
-      const canvas = document.getElementById("canvas");
-      const ctx = canvas.getContext("2d");
+      // ---- Canvas & Audio Setup ----
+      const canvas = document.getElementById("canvas"),
+        ctx = canvas.getContext("2d");
       canvas.width = window.innerWidth;
       canvas.height = window.innerHeight;
       window.addEventListener("resize", () => {
         canvas.width = window.innerWidth;
         canvas.height = window.innerHeight;
-        updateCellDimensions();
+        cellWidth = canvas.width / 50;
+        cellHeight = canvas.height / 50;
+        cellArea = cellWidth * cellHeight;
       });
-      const AudioContext = window.AudioContext || window.webkitAudioContext;
-      const audioCtx = new AudioContext();
+      const AudioContext = window.AudioContext || window.webkitAudioContext,
+        audioCtx = new AudioContext();
+      let cellWidth = canvas.width / 50,
+        cellHeight = canvas.height / 50,
+        cellArea = cellWidth * cellHeight;
 
-      // -------------------- Pane Class & Globals --------------------
-      let panes = [];
-      let selectedPane = null;
-      let isDragging = false,
-        dragOffsetX = 0,
-        dragOffsetY = 0;
-      let resizing = false,
-        resizeOffsetX = 0,
-        resizeOffsetY = 0;
-      let resizeMargin = 30;
-      if ("ontouchstart" in window || navigator.maxTouchPoints > 0) {
-        resizeMargin = 30;
-      }
-      let paneIdCounter = 0;
-
-      function Pane(x, y, width, height, mapping, sliderValue) {
-        this.id = paneIdCounter++;
-        this.x = x;
-        this.y = y;
-        this.width = width;
-        this.height = height;
-        this.mapping = mapping;
-        this.alpha = 0.8;
-
-        // Calculate hue based on slider value
-        const ratio = sliderValue / sliderRange;
-        const hue = mapping.H_low + ratio * (mapping.H_high - mapping.H_low);
-        this.hsl = { h: hue % 360, s: 100, l: 50 }; // Full saturation, mid lightness
-
-        // Convert to RGB
-        const [r, g, b] = hslToRgb(this.hsl.h, this.hsl.s, this.hsl.l);
-        this.rgb = { r, g, b };
-
-        // Get LAB L value for frequency
-        const [l] = rgbToLab(r, g, b);
-        this.baseFrequency = getFrequencyFromLabL(l);
-
-        this.oscillator = audioCtx.createOscillator();
-        this.gainNode = audioCtx.createGain();
-        this.oscillator.type = "sine";
-        this.oscillator.frequency.value = this.baseFrequency;
-        this.gainNode.gain.value = 0.05;
-        this.oscillator.connect(this.gainNode);
-        this.gainNode.connect(audioCtx.destination);
-        this.oscillator.start();
-
-        this.slider = null;
-      }
-      Pane.prototype.draw = function (ctx, visibleArea) {
-        ctx.fillStyle = `rgb(${this.rgb.r}, ${this.rgb.g}, ${this.rgb.b})`;
-        ctx.globalAlpha = 0.8;
-        ctx.fillRect(this.x, this.y, this.width, this.height);
-        ctx.globalAlpha = 1.0;
-        if (visibleArea > 0.001) {
+      // ---- Pane Class ----
+      class Pane {
+        constructor(x, y, width, height, mapping, sliderValue) {
+          this.id = Pane.idCounter++;
+          this.x = x;
+          this.y = y;
+          this.width = width;
+          this.height = height;
+          this.mapping = mapping;
+          const ratio = sliderValue / sliderRange,
+            hue = mapping.H_low + ratio * (mapping.H_high - mapping.H_low);
+          this.hsl = { h: hue % 360, s: 100, l: 50 };
+          const [r, g, b] = hslToRgb(this.hsl.h, this.hsl.s, this.hsl.l);
+          this.rgb = { r, g, b };
+          const [L] = rgbToLab(r, g, b);
+          this.baseFrequency = getFrequencyFromLabL(L);
+          this.osc = audioCtx.createOscillator();
+          this.gain = audioCtx.createGain();
+          this.osc.type = "sine";
+          this.osc.frequency.value = this.baseFrequency;
+          this.gain.gain.value = 0.05;
+          this.osc.connect(this.gain);
+          this.gain.connect(audioCtx.destination);
+          this.osc.start();
+          this.slider = null;
+        }
+        draw(ctx, vol = 1) {
+          ctx.fillStyle = `rgb(${this.rgb.r},${this.rgb.g},${this.rgb.b})`;
+          ctx.globalAlpha = 0.8;
+          ctx.fillRect(this.x, this.y, this.width, this.height);
+          ctx.globalAlpha = 1;
           ctx.fillStyle = "white";
           ctx.font = "16px sans-serif";
-          let freq = this.oscillator.frequency.value;
-          ctx.fillText(freq.toFixed(2) + " Hz", this.x + 5, this.y + 20);
-        }
-      };
-      Pane.prototype.contains = function (x, y) {
-        return (
-          x >= this.x &&
-          x <= this.x + this.width &&
-          y >= this.y &&
-          y <= this.y + this.height
-        );
-      };
-
-      // -------------------- Frequency Editing (Click-based Only) --------------------
-      const freqInput = document.getElementById("freqInput");
-      let editingPane = null;
-      function startEditing(pane) {
-        editingPane = pane;
-        freqInput.value = pane.oscillator.frequency.value.toFixed(2);
-        freqInput.style.display = "block";
-        freqInput.style.left = pane.x + 5 + "px";
-        freqInput.style.top = pane.y + 5 + "px";
-        freqInput.focus();
-        freqInput.select();
-      }
-      function commitEditing() {
-        if (!editingPane) return;
-        let newFreq = parseFloat(freqInput.value);
-        if (!isNaN(newFreq)) {
-          let newL = ((newFreq - 200) / 800) * 100;
-          newL = Math.max(
-            editingPane.mapping.L_low,
-            Math.min(newL, editingPane.mapping.L_high)
+          ctx.fillText(
+            this.osc.frequency.value.toFixed(2) + " Hz",
+            this.x + 5,
+            this.y + 20
           );
-          let ratio =
-            (newL - editingPane.mapping.L_low) /
-            (editingPane.mapping.L_high - editingPane.mapping.L_low);
-          let newH =
-            editingPane.mapping.H_low +
-            ratio * (editingPane.mapping.H_high - editingPane.mapping.H_low);
-          editingPane.hsl.l = newL;
-          editingPane.hsl.h = newH;
-          editingPane.baseFrequency = getFrequencyFromLabL(newL);
-          if (editingPane.slider) {
-            let xVal =
-              ((newL - editingPane.mapping.L_low) /
-                (editingPane.mapping.L_high - editingPane.mapping.L_low)) *
-              sliderRange;
-            editingPane.slider.value = xVal;
+          if (this.slider) {
+            this.slider.style.left = this.x + "px";
+            this.slider.style.top = this.y + this.height + 5 + "px";
+            this.slider.style.width = this.width + "px";
           }
         }
-        freqInput.style.display = "none";
-        editingPane = null;
+        contains(x, y) {
+          return (
+            x >= this.x &&
+            x <= this.x + this.width &&
+            y >= this.y &&
+            y <= this.y + this.height
+          );
+        }
+        toggleSlider() {
+          if (this.slider) {
+            document.body.removeChild(this.slider);
+            this.slider = null;
+          } else {
+            const slider = document.createElement("input");
+            slider.type = "range";
+            slider.min = 0;
+            slider.max = sliderRange;
+            slider.step = 0.1;
+            let currentHue = this.hsl.h;
+            if (currentHue < this.mapping.H_low) currentHue += 360;
+            slider.value =
+              ((currentHue - this.mapping.H_low) /
+                (this.mapping.H_high - this.mapping.H_low)) *
+              sliderRange;
+            slider.className = "hue-slider";
+            slider.style.left = this.x + "px";
+            slider.style.top = this.y + this.height + 5 + "px";
+            slider.style.width = this.width + "px";
+            slider.addEventListener("input", () => {
+              const newHue =
+                (this.mapping.H_low +
+                  (slider.value / sliderRange) *
+                    (this.mapping.H_high - this.mapping.H_low)) %
+                360;
+              this.hsl.h = newHue;
+              const [r, g, b] = hslToRgb(newHue, this.hsl.s, this.hsl.l);
+              this.rgb = { r, g, b };
+              const [L] = rgbToLab(r, g, b);
+              this.baseFrequency = getFrequencyFromLabL(L);
+            });
+            ["mouseup", "touchend"].forEach((evt) => {
+              slider.addEventListener(evt, () =>
+                setTimeout(() => {
+                  if (slider.parentNode) slider.parentNode.removeChild(slider);
+                  this.slider = null;
+                }, 500)
+              );
+            });
+            document.body.appendChild(slider);
+            this.slider = slider;
+          }
+        }
       }
-      document.addEventListener("keydown", (e) => {
-        if (e.key === "Enter" && editingPane) {
-          commitEditing();
+      Pane.idCounter = 0;
+
+      // ---- Global Variables & Frequency Input ----
+      let panes = [],
+        selectedPane = null,
+        isDragging = false,
+        dragOffsetX = 0,
+        dragOffsetY = 0,
+        resizing = false,
+        resizeOffsetX = 0,
+        resizeOffsetY = 0;
+      const resizeMargin = 30;
+      const freqInput = document.getElementById("freqInput");
+      let editingPane = null;
+
+      // ---- Event Listeners ----
+      canvas.addEventListener("click", (e) => {
+        const rect = canvas.getBoundingClientRect(),
+          x = e.clientX - rect.left,
+          y = e.clientY - rect.top;
+        // Check for frequency editing click (top-left of a pane)
+        for (let i = panes.length - 1; i >= 0; i--) {
+          const p = panes[i];
+          if (x >= p.x + 5 && x <= p.x + 105 && y >= p.y + 5 && y <= p.y + 30) {
+            editingPane = p;
+            freqInput.value = p.osc.frequency.value.toFixed(2);
+            freqInput.style.display = "block";
+            freqInput.style.left = p.x + 5 + "px";
+            freqInput.style.top = p.y + 5 + "px";
+            freqInput.focus();
+            freqInput.select();
+            return;
+          }
         }
       });
-      canvas.addEventListener("click", (e) => {
-        const rect = canvas.getBoundingClientRect();
-        const mouseX = e.clientX - rect.left;
-        const mouseY = e.clientY - rect.top;
+
+      canvas.addEventListener("mousedown", (e) => {
+        if (audioCtx.state === "suspended") audioCtx.resume();
+        const rect = canvas.getBoundingClientRect(),
+          x = e.clientX - rect.left,
+          y = e.clientY - rect.top;
         for (let i = panes.length - 1; i >= 0; i--) {
-          let p = panes[i];
-          if (
-            mouseX >= p.x + 5 &&
-            mouseX <= p.x + 105 &&
-            mouseY >= p.y + 5 &&
-            mouseY <= p.y + 30
-          ) {
-            startEditing(p);
+          const p = panes[i];
+          if (p.contains(x, y)) {
+            if (
+              x >= p.x + p.width - resizeMargin &&
+              y >= p.y + p.height - resizeMargin
+            ) {
+              selectedPane = p;
+              resizing = true;
+              resizeOffsetX = p.x + p.width - x;
+              resizeOffsetY = p.y + p.height - y;
+            } else {
+              selectedPane = p;
+              isDragging = true;
+              dragOffsetX = x - p.x;
+              dragOffsetY = y - p.y;
+            }
+            // Bring selected pane to front
+            panes.splice(i, 1);
+            panes.push(p);
             break;
           }
         }
       });
 
-      // -------------------- Desktop Drag/Resize --------------------
-      canvas.addEventListener("mousedown", (e) => {
-        if (audioCtx.state === "suspended") audioCtx.resume();
-        const rect = canvas.getBoundingClientRect();
-        const mouseX = e.clientX - rect.left;
-        const mouseY = e.clientY - rect.top;
-        for (let i = panes.length - 1; i >= 0; i--) {
-          let p = panes[i];
-          if (p.contains(mouseX, mouseY)) {
-            if (
-              mouseX >= p.x + p.width - resizeMargin &&
-              mouseY >= p.y + p.height - resizeMargin
-            ) {
-              selectedPane = p;
-              resizing = true;
-              resizeOffsetX = p.x + p.width - mouseX;
-              resizeOffsetY = p.y + p.height - mouseY;
-            } else {
-              selectedPane = p;
-              isDragging = true;
-              dragOffsetX = mouseX - p.x;
-              dragOffsetY = mouseY - p.y;
-            }
-            panes.splice(i, 1);
-            panes.push(p);
-            return;
-          }
-        }
-      });
       canvas.addEventListener("mousemove", (e) => {
         if (!selectedPane) return;
-        const rect = canvas.getBoundingClientRect();
-        const mouseX = e.clientX - rect.left,
-          mouseY = e.clientY - rect.top;
+        const rect = canvas.getBoundingClientRect(),
+          x = e.clientX - rect.left,
+          y = e.clientY - rect.top;
         if (resizing) {
-          let newWidth = mouseX - selectedPane.x + resizeOffsetX;
-          let newHeight = mouseY - selectedPane.y + resizeOffsetY;
-          selectedPane.width = Math.max(50, newWidth);
-          selectedPane.height = Math.max(50, newHeight);
+          selectedPane.width = Math.max(50, x - selectedPane.x + resizeOffsetX);
+          selectedPane.height = Math.max(
+            50,
+            y - selectedPane.y + resizeOffsetY
+          );
         } else if (isDragging) {
-          selectedPane.x = mouseX - dragOffsetX;
-          selectedPane.y = mouseY - dragOffsetY;
+          selectedPane.x = x - dragOffsetX;
+          selectedPane.y = y - dragOffsetY;
         }
       });
+
       canvas.addEventListener("mouseup", () => {
         selectedPane = null;
         isDragging = false;
@@ -375,242 +326,161 @@
         resizing = false;
       });
 
-      // -------------------- Double-click (Toggle Slider / New Pane) --------------------
       canvas.addEventListener("dblclick", (e) => {
-        const rect = canvas.getBoundingClientRect();
-        const mouseX = e.clientX - rect.left,
-          mouseY = e.clientY - rect.top;
-        let clickedPane = null;
-        for (let i = panes.length - 1; i >= 0; i--) {
-          let p = panes[i];
-          if (p.contains(mouseX, mouseY)) {
-            clickedPane = p;
-            break;
-          }
-        }
-        if (clickedPane) {
-          toggleHueSlider(clickedPane);
-        } else {
-          function randomRange(min, max) {
-            return min + Math.random() * (max - min);
-          }
-          let width = randomRange(100, 300),
-            height = randomRange(100, 300);
-          let x = Math.min(mouseX - width / 2, canvas.width - width);
-          let y = Math.min(mouseY - height / 2, canvas.height - height);
-          let mapping = randomMapping();
-          let sliderValue = Math.random() * sliderRange;
-          panes.push(new Pane(x, y, width, height, mapping, sliderValue));
+        const rect = canvas.getBoundingClientRect(),
+          x = e.clientX - rect.left,
+          y = e.clientY - rect.top;
+        let p = panes.find((p) => p.contains(x, y));
+        if (p) p.toggleSlider();
+        else {
+          const rand = (min, max) => min + Math.random() * (max - min);
+          let width = rand(100, 300),
+            height = rand(100, 300),
+            xPos = Math.min(x - width / 2, canvas.width - width),
+            yPos = Math.min(y - height / 2, canvas.height - height);
+          panes.push(
+            new Pane(
+              xPos,
+              yPos,
+              width,
+              height,
+              randomMapping(),
+              Math.random() * sliderRange
+            )
+          );
         }
       });
 
-      // -------------------- Right-click to Delete --------------------
       canvas.addEventListener("contextmenu", (e) => {
         e.preventDefault();
-        const rect = canvas.getBoundingClientRect();
-        const mouseX = e.clientX - rect.left,
-          mouseY = e.clientY - rect.top;
+        const rect = canvas.getBoundingClientRect(),
+          x = e.clientX - rect.left,
+          y = e.clientY - rect.top;
         for (let i = panes.length - 1; i >= 0; i--) {
-          let p = panes[i];
-          if (p.contains(mouseX, mouseY)) {
+          const p = panes[i];
+          if (p.contains(x, y)) {
             if (p.slider) document.body.removeChild(p.slider);
-            
-            // Immediately disconnect after a quick fade
-            const currentTime = audioCtx.currentTime;
-            p.gainNode.gain.cancelScheduledValues(currentTime);
-            p.gainNode.gain.setValueAtTime(p.gainNode.gain.value, currentTime);
-            p.gainNode.gain.exponentialRampToValueAtTime(0.0001, currentTime + 0.05);
-            
+            let t = audioCtx.currentTime;
+            p.gain.gain.cancelScheduledValues(t);
+            p.gain.gain.setValueAtTime(p.gain.gain.value, t);
+            p.gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.05);
             setTimeout(() => {
-              p.oscillator.stop();
-              p.oscillator.disconnect();
-              p.gainNode.disconnect();
-            }, 60); // Reduced from 500ms to 60ms to match the ramp
-
+              p.osc.stop();
+              p.osc.disconnect();
+              p.gain.disconnect();
+            }, 60);
             panes.splice(i, 1);
             break;
           }
         }
       });
 
-      // -------------------- Hue Slider Toggling --------------------
-      function toggleHueSlider(p) {
-        if (p.slider) {
-          document.body.removeChild(p.slider);
-          p.slider = null;
-        } else {
-          const slider = document.createElement("input");
-          slider.type = "range";
-          slider.min = 0;
-          slider.max = sliderRange;
-          slider.step = 0.1;
-
-          // Calculate slider value from current hue
-          let currentHue = p.hsl.h;
-          // Unwrap the hue if it's less than H_low
-          if (currentHue < p.mapping.H_low) {
-            currentHue += 360;
-          }
-          const ratio = (currentHue - p.mapping.H_low) / (p.mapping.H_high - p.mapping.H_low);
-          slider.value = ratio * sliderRange;
-
-          slider.className = "hue-slider";
-          slider.style.left = p.x + "px";
-          slider.style.top = p.y + p.height + 5 + "px";
-          slider.style.width = p.width + "px";
-
-          slider.addEventListener("input", () => {
-            const x = parseFloat(slider.value);
-            const ratio = x / sliderRange;
-
-            // Update HSL
-            const newHue =
-              (p.mapping.H_low + ratio * (p.mapping.H_high - p.mapping.H_low)) %
-              360;
-            p.hsl.h = newHue;
-
-            // Update RGB
-            const [r, g, b] = hslToRgb(newHue, p.hsl.s, p.hsl.l);
-            p.rgb = { r, g, b };
-
-            // Update frequency based on LAB L
-            const [l] = rgbToLab(r, g, b);
-            p.baseFrequency = getFrequencyFromLabL(l);
-          });
-
-          // Add touchend event listener to remove slider
-          slider.addEventListener("touchend", () => {
-            setTimeout(() => {
-              document.body.removeChild(slider);
-              p.slider = null;
-            }, 500); // Small delay to ensure the value is set
-          });
-
-          // Add mouseup event listener to remove slider
-          slider.addEventListener("mouseup", () => {
-            setTimeout(() => {
-              document.body.removeChild(slider);
-              p.slider = null;
-            }, 500); // Small delay to ensure the value is set
-          });
-
-          document.body.appendChild(slider);
-          p.slider = slider;
-        }
-      }
-
-      // -------------------- Mobile Touch Events --------------------
-      let lastTapTime = 0;
-      let tapTimeout, longPressTimeout;
-      const longPressDuration = 800;
+      // Minimal touch support (similar to mouse)
+      let lastTap = 0,
+        tapTimeout,
+        longPressTimeout;
       canvas.addEventListener(
         "touchstart",
         (e) => {
           e.preventDefault();
           if (audioCtx.state === "suspended") audioCtx.resume();
-          const touch = e.touches[0];
-          const rect = canvas.getBoundingClientRect();
-          const touchX = touch.clientX - rect.left,
-            touchY = touch.clientY - rect.top;
+          const touch = e.touches[0],
+            rect = canvas.getBoundingClientRect(),
+            x = touch.clientX - rect.left,
+            y = touch.clientY - rect.top;
           longPressTimeout = setTimeout(() => {
-            for (let i = panes.length - 1; i >= 0; i--) {
-              let p = panes[i];
-              if (p.contains(touchX, touchY)) {
-                if (p.slider) document.body.removeChild(p.slider);
-                p.gainNode.gain.setValueAtTime(
-                  p.gainNode.gain.value,
-                  audioCtx.currentTime
-                );
-
-                p.gainNode.gain.exponentialRampToValueAtTime(
-                  0.0001,
-                  audioCtx.currentTime + 0.03
-                );
-
-                setTimeout(() => {
-                  p.oscillator.stop();
-                  p.oscillator.disconnect();
-                  p.gainNode.disconnect();
-                }, 500);
-
-                panes.splice(i, 1);
-                break;
-              }
+            let p = panes.find((p) => p.contains(x, y));
+            if (p) {
+              if (p.slider) document.body.removeChild(p.slider);
+              p.gain.gain.setValueAtTime(
+                p.gain.gain.value,
+                audioCtx.currentTime
+              );
+              p.gain.gain.exponentialRampToValueAtTime(
+                0.0001,
+                audioCtx.currentTime + 0.03
+              );
+              setTimeout(() => {
+                p.osc.stop();
+                p.osc.disconnect();
+                p.gain.disconnect();
+              }, 500);
+              panes.splice(panes.indexOf(p), 1);
             }
-          }, longPressDuration);
-          let found = false;
-          for (let i = panes.length - 1; i >= 0; i--) {
-            let p = panes[i];
-            if (p.contains(touchX, touchY)) {
-              found = true;
-              const currentTime = Date.now();
-              if (currentTime - lastTapTime < 300) {
-                clearTimeout(tapTimeout);
-                clearTimeout(longPressTimeout);
-                toggleHueSlider(p);
-              } else {
-                if (
-                  touchX >= p.x + p.width - resizeMargin * 2 &&
-                  touchY >= p.y + p.height - resizeMargin * 2
-                ) {
-                  selectedPane = p;
-                  resizing = true;
-                  resizeOffsetX = p.x + p.width - touchX;
-                  resizeOffsetY = p.y + p.height - touchY;
-                } else {
-                  selectedPane = p;
-                  isDragging = true;
-                  dragOffsetX = touchX - p.x;
-                  dragOffsetY = touchY - p.y;
-                }
-              }
-              panes.splice(i, 1);
-              panes.push(p);
-              break;
-            }
-          }
-          if (!found) {
-            const currentTime = Date.now();
-            if (currentTime - lastTapTime < 300) {
+          }, 800);
+          let p = panes.find((p) => p.contains(x, y));
+          if (p) {
+            if (Date.now() - lastTap < 300) {
               clearTimeout(tapTimeout);
-              let mapping = randomMapping();
-              let sliderValue = Math.random() * sliderRange;
-              let width = 200,
-                height = 200;
-              let x = touchX - width / 2,
-                y = touchY - height / 2;
-              panes.push(new Pane(x, y, width, height, mapping, sliderValue));
+              clearTimeout(longPressTimeout);
+              p.toggleSlider();
+            } else {
+              if (
+                x >= p.x + p.width - resizeMargin * 2 &&
+                y >= p.y + p.height - resizeMargin * 2
+              ) {
+                selectedPane = p;
+                resizing = true;
+                resizeOffsetX = p.x + p.width - x;
+                resizeOffsetY = p.y + p.height - y;
+              } else {
+                selectedPane = p;
+                isDragging = true;
+                dragOffsetX = x - p.x;
+                dragOffsetY = y - p.y;
+              }
+            }
+            panes.splice(panes.indexOf(p), 1);
+            panes.push(p);
+          } else {
+            if (Date.now() - lastTap < 300) {
+              panes.push(
+                new Pane(
+                  x - 100,
+                  y - 100,
+                  200,
+                  200,
+                  randomMapping(),
+                  Math.random() * sliderRange
+                )
+              );
             } else {
               tapTimeout = setTimeout(() => {}, 300);
             }
           }
-          lastTapTime = Date.now();
+          lastTap = Date.now();
         },
         { passive: false }
       );
+
       canvas.addEventListener(
         "touchmove",
         (e) => {
           e.preventDefault();
           clearTimeout(longPressTimeout);
-          const touch = e.touches[0];
-          const rect = canvas.getBoundingClientRect();
-          const touchX = touch.clientX - rect.left,
-            touchY = touch.clientY - rect.top;
+          const touch = e.touches[0],
+            rect = canvas.getBoundingClientRect(),
+            x = touch.clientX - rect.left,
+            y = touch.clientY - rect.top;
           if (selectedPane) {
             if (resizing) {
-              let newWidth = touchX - selectedPane.x + resizeOffsetX;
-              let newHeight = touchY - selectedPane.y + resizeOffsetY;
-              selectedPane.width = Math.max(50, newWidth);
-              selectedPane.height = Math.max(50, newHeight);
+              selectedPane.width = Math.max(
+                50,
+                x - selectedPane.x + resizeOffsetX
+              );
+              selectedPane.height = Math.max(
+                50,
+                y - selectedPane.y + resizeOffsetY
+              );
             } else if (isDragging) {
-              selectedPane.x = touchX - dragOffsetX;
-              selectedPane.y = touchY - dragOffsetY;
+              selectedPane.x = x - dragOffsetX;
+              selectedPane.y = y - dragOffsetY;
             }
           }
         },
         { passive: false }
       );
+
       canvas.addEventListener(
         "touchend",
         (e) => {
@@ -623,21 +493,8 @@
         { passive: false }
       );
 
-      // -------------------- Composite Sound Calculation via "Screen" Blend --------------------
-      const sampleCountX = 50,
-        sampleCountY = 50;
-      let cellWidth, cellHeight, cellArea;
-      function updateCellDimensions() {
-        cellWidth = canvas.width / sampleCountX;
-        cellHeight = canvas.height / sampleCountY;
-        cellArea = cellWidth * cellHeight;
-      }
-      updateCellDimensions();
-      window.addEventListener("resize", updateCellDimensions);
-
-      // compositeOscillators: key-> {osc, gain}
+      // ---- Composite Sound & Animation ----
       let compositeOscillators = {};
-
       function animate() {
         requestAnimationFrame(animate);
         ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -645,42 +502,29 @@
         ctx.fillStyle = "black";
         ctx.fillRect(0, 0, canvas.width, canvas.height);
         ctx.globalCompositeOperation = "lighter";
-        const currentTime = audioCtx.currentTime;
-
-        // track how much single coverage area each pane has => volume
-        let individualVolumes = {};
-        panes.forEach((p) => {
-          individualVolumes[p.id] = 0;
-        });
-
-        // track each composite region => { area, sumX, sumY, sumR, sumG, sumB }
-        let compositeRegions = {};
-
-        // sample grid
-        for (let i = 0; i < sampleCountX; i++) {
-          for (let j = 0; j < sampleCountY; j++) {
-            let sampleX = (i + 0.5) * cellWidth;
-            let sampleY = (j + 0.5) * cellHeight;
-            let covering = [];
-            for (let p of panes) {
-              if (
+        const t = audioCtx.currentTime;
+        let indiv = {};
+        panes.forEach((p) => (indiv[p.id] = 0));
+        let compRegions = {};
+        for (let i = 0; i < 50; i++) {
+          for (let j = 0; j < 50; j++) {
+            const sampleX = (i + 0.5) * cellWidth,
+              sampleY = (j + 0.5) * cellHeight;
+            const covering = panes.filter(
+              (p) =>
                 sampleX >= p.x &&
                 sampleX <= p.x + p.width &&
                 sampleY >= p.y &&
                 sampleY <= p.y + p.height
-              ) {
-                covering.push(p);
-              }
-            }
-            if (covering.length === 1) {
-              individualVolumes[covering[0].id] += cellArea;
-            } else if (covering.length >= 2) {
+            );
+            if (covering.length === 1) indiv[covering[0].id] += cellArea;
+            else if (covering.length >= 2) {
               let key = covering
-                .map((pp) => pp.id)
+                .map((p) => p.id)
                 .sort((a, b) => a - b)
                 .join(",");
-              if (!compositeRegions[key]) {
-                compositeRegions[key] = {
+              if (!compRegions[key])
+                compRegions[key] = {
                   area: 0,
                   sumX: 0,
                   sumY: 0,
@@ -688,108 +532,91 @@
                   sumG: 0,
                   sumB: 0,
                 };
-              }
-              // do a screen blend among all covering panes
-              let finalR = 0,
-                finalG = 0,
-                finalB = 0;
-              for (let p of covering) {
-                let { r, g, b } = p.rgb;
-                // Normalize RGB values to [0,1] for blending
-                finalR = screenChannel(finalR, r / 255);
-                finalG = screenChannel(finalG, g / 255);
-                finalB = screenChannel(finalB, b / 255);
-              }
-              compositeRegions[key].area += cellArea;
-              compositeRegions[key].sumX += sampleX * cellArea;
-              compositeRegions[key].sumY += sampleY * cellArea;
-              // Store the blended RGB values back in [0,255] range
-              compositeRegions[key].sumR += finalR * 255 * cellArea;
-              compositeRegions[key].sumG += finalG * 255 * cellArea;
-              compositeRegions[key].sumB += finalB * 255 * cellArea;
+              let r = 0,
+                g = 0,
+                b = 0;
+              covering.forEach((p) => {
+                r = screenChannel(r, p.rgb.r / 255);
+                g = screenChannel(g, p.rgb.g / 255);
+                b = screenChannel(b, p.rgb.b / 255);
+              });
+              compRegions[key].area += cellArea;
+              compRegions[key].sumX += sampleX * cellArea;
+              compRegions[key].sumY += sampleY * cellArea;
+              compRegions[key].sumR += r * 255 * cellArea;
+              compRegions[key].sumG += g * 255 * cellArea;
+              compRegions[key].sumB += b * 255 * cellArea;
             }
           }
         }
-
-        // reference area
-        const referenceArea = 30000;
-
-        // update volumes for each pane
-        for (let p of panes) {
-          let vol = 0.05 * (individualVolumes[p.id] / referenceArea);
-          vol = Math.min(vol, 0.2);
-          p.gainNode.gain.setTargetAtTime(vol, currentTime, 0.05);
-          p.oscillator.frequency.setTargetAtTime(
-            p.baseFrequency,
-            currentTime,
-            0.05
-          );
-        }
-
-        // draw each pane
-        for (let p of panes) {
-          p.draw(ctx, individualVolumes[p.id]);
-          if (p.slider) {
-            p.slider.style.left = p.x + "px";
-            p.slider.style.top = p.y + p.height + 5 + "px";
-            p.slider.style.width = p.width + "px";
-          }
-        }
-
-        // for each composite region, compute average color => freq from L
-        for (let key in compositeRegions) {
-          let region = compositeRegions[key];
-          let area = region.area;
-          let avgR = region.sumR / area;
-          let avgG = region.sumG / area;
-          let avgB = region.sumB / area;
-
-          // Convert directly to LAB and use L value for frequency
-          const [l] = rgbToLab(avgR, avgG, avgB);
-          let compFreq = getFrequencyFromLabL(l);
-          let compVol = 0.05 * (area / referenceArea);
-          compVol = Math.min(compVol, 0.2);
+        const refArea = 30000;
+        panes.forEach((p) => {
+          let vol = Math.min(0.05 * (indiv[p.id] / refArea), 0.2);
+          p.gain.gain.setTargetAtTime(vol, t, 0.05);
+          p.osc.frequency.setTargetAtTime(p.baseFrequency, t, 0.05);
+          p.draw(ctx, indiv[p.id]);
+        });
+        for (let key in compRegions) {
+          const region = compRegions[key],
+            area = region.area;
+          const avgR = region.sumR / area,
+            avgG = region.sumG / area,
+            avgB = region.sumB / area;
+          const [L] = rgbToLab(avgR, avgG, avgB);
+          const compFreq = getFrequencyFromLabL(L);
+          const compVol = Math.min(0.05 * (area / refArea), 0.2);
           if (!compositeOscillators[key]) {
-            let osc = audioCtx.createOscillator();
-            let gain = audioCtx.createGain();
+            const osc = audioCtx.createOscillator(),
+              gain = audioCtx.createGain();
             osc.type = "sine";
             osc.frequency.value = compFreq;
-            // Start with a minimal gain to avoid a click
             gain.gain.value = 0.0001;
             osc.connect(gain);
             gain.connect(audioCtx.destination);
             osc.start();
-            // Schedule an exponential ramp from 0.0001 up to compVol over 50ms
-            gain.gain.cancelScheduledValues(currentTime);
-            gain.gain.setValueAtTime(0.0001, currentTime);
-            gain.gain.exponentialRampToValueAtTime(compVol, currentTime + 0.05);
+            gain.gain.cancelScheduledValues(t);
+            gain.gain.setValueAtTime(0.0001, t);
+            gain.gain.exponentialRampToValueAtTime(compVol, t + 0.05);
             compositeOscillators[key] = { osc, gain };
           } else {
             let c = compositeOscillators[key];
-            c.osc.frequency.setTargetAtTime(compFreq, currentTime, 0.05);
-            c.gain.gain.setTargetAtTime(compVol, currentTime, 0.05);
+            c.osc.frequency.setTargetAtTime(compFreq, t, 0.05);
+            c.gain.gain.setTargetAtTime(compVol, t, 0.05);
           }
-
-          let centroidX = region.sumX / area,
+          const centroidX = region.sumX / area,
             centroidY = region.sumY / area;
           ctx.fillStyle = "white";
           ctx.font = "16px sans-serif";
           ctx.fillText(compFreq.toFixed(2) + " Hz", centroidX - 30, centroidY);
         }
+        for (let key in compositeOscillators) {
+          if (!(key in compRegions)) {
+            let c = compositeOscillators[key];
+            c.gain.gain.cancelScheduledValues(t);
+            c.gain.gain.setValueAtTime(Math.max(0.0001, c.gain.gain.value), t);
+            c.gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.05);
+            setTimeout(() => {
+              c.osc.stop();
+              c.osc.disconnect();
+              c.gain.disconnect();
+              delete compositeOscillators[key];
+            }, 60);
+          }
+        }
 
-        // perfect fifth detection among individual pane frequencies
+        // Perfect Fifth Detection
         const perfectFifth = 1.5,
           tolerance = 0.01;
         for (let i = 0; i < panes.length; i++) {
           for (let j = i + 1; j < panes.length; j++) {
-            let f1 = panes[i].oscillator.frequency.value;
-            let f2 = panes[j].oscillator.frequency.value;
-            let ratio = Math.max(f1, f2) / Math.min(f1, f2);
+            const f1 = panes[i].osc.frequency.value;
+            const f2 = panes[j].osc.frequency.value;
+            const ratio = Math.max(f1, f2) / Math.min(f1, f2);
             if (Math.abs(ratio - perfectFifth) < tolerance) {
-              let x1 = panes[i].x + panes[i].width / 2,
-                y1 = panes[i].y + panes[i].height / 2;
-              let x2 = panes[j].x + panes[j].width / 2,
-                y2 = panes[j].y + panes[j].height / 2;
+              const x1 = panes[i].x + panes[i].width / 2;
+              const y1 = panes[i].y + panes[i].height / 2;
+              const x2 = panes[j].x + panes[j].width / 2;
+              const y2 = panes[j].y + panes[j].height / 2;
               ctx.strokeStyle = "white";
               ctx.lineWidth = 3;
               ctx.beginPath();
@@ -799,72 +626,8 @@
             }
           }
         }
-
-        // remove composite oscillators not present
-        for (let key in compositeOscillators) {
-          if (!(key in compositeRegions)) {
-            let compOsc = compositeOscillators[key];
-            const currentTime = audioCtx.currentTime;
-            
-            // Cancel any scheduled values
-            compOsc.gain.gain.cancelScheduledValues(currentTime);
-            compOsc.gain.gain.setValueAtTime(
-              Math.max(0.0001, compOsc.gain.gain.value),
-              currentTime
-            );
-            compOsc.gain.gain.exponentialRampToValueAtTime(0.0001, currentTime + 0.05);
-            
-            // Clean up immediately after the fade
-            setTimeout(() => {
-              compOsc.osc.stop();
-              compOsc.osc.disconnect();
-              compOsc.gain.disconnect();
-              delete compositeOscillators[key];
-            }, 60); // Reduced from 500ms to 60ms to match the ramp
-          }
-        }
       }
       animate();
-
-      // -------------------- Color Space Conversion Functions --------------------
-      function rgbToLab(r, g, b) {
-        // First convert RGB to XYZ
-        r /= 255;
-        g /= 255;
-        b /= 255;
-
-        // Assume sRGB
-        r = r > 0.04045 ? Math.pow((r + 0.055) / 1.055, 2.4) : r / 12.92;
-        g = g > 0.04045 ? Math.pow((g + 0.055) / 1.055, 2.4) : g / 12.92;
-        b = b > 0.04045 ? Math.pow((b + 0.055) / 1.055, 2.4) : b / 12.92;
-
-        // Convert to XYZ
-        const x = r * 0.4124564 + g * 0.3575761 + b * 0.1804375;
-        const y = r * 0.2126729 + g * 0.7151522 + b * 0.072175;
-        const z = r * 0.0193339 + g * 0.119192 + b * 0.9503041;
-
-        // Convert XYZ to Lab
-        const xn = 0.95047,
-          yn = 1.0,
-          zn = 1.08883;
-        const fx =
-          x > 0.008856 ? Math.pow(x / xn, 1 / 3) : (7.787 * x) / xn + 16 / 116;
-        const fy =
-          y > 0.008856 ? Math.pow(y / yn, 1 / 3) : (7.787 * y) / yn + 16 / 116;
-        const fz =
-          z > 0.008856 ? Math.pow(z / zn, 1 / 3) : (7.787 * z) / zn + 16 / 116;
-
-        return [
-          116 * fy - 16, // L
-          500 * (fx - fy), // a
-          200 * (fy - fz), // b
-        ];
-      }
-
-      function hslToLab(h, s, l) {
-        const [r, g, b] = hslToRgb(h, s, l);
-        return rgbToLab(r, g, b);
-      }
     </script>
   </body>
 </html>

@@ -79,8 +79,8 @@
     <script>
       // -------------------- Frequency & Color Helpers --------------------
       // Map L in [0..100] to freq in [200..1000].
-      function getFrequencyFromL(L) {
-        return 200 + (L / 100) * 800;
+      function getFrequencyFromLabL(labL) {
+        return 200 + (labL / 100) * 800;
       }
 
       // Convert an HSL color (h in [0..360], s,l in [0..100]) to RGB [0..1].
@@ -88,27 +88,29 @@
         s /= 100;
         l /= 100;
         const c = (1 - Math.abs(2 * l - 1)) * s;
-        const x = c * (1 - Math.abs((h / 60) % 2 - 1));
-        const m = l - c/2;
+        const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+        const m = l - c / 2;
         let r, g, b;
-        
-        if (h < 60) { [r, g, b] = [c, x, 0]; }
-        else if (h < 120) { [r, g, b] = [x, c, 0]; }
-        else if (h < 180) { [r, g, b] = [0, c, x]; }
-        else if (h < 240) { [r, g, b] = [0, x, c]; }
-        else if (h < 300) { [r, g, b] = [x, 0, c]; }
-        else { [r, g, b] = [c, 0, x]; }
-        
+
+        if (h < 60) {
+          [r, g, b] = [c, x, 0];
+        } else if (h < 120) {
+          [r, g, b] = [x, c, 0];
+        } else if (h < 180) {
+          [r, g, b] = [0, c, x];
+        } else if (h < 240) {
+          [r, g, b] = [0, x, c];
+        } else if (h < 300) {
+          [r, g, b] = [x, 0, c];
+        } else {
+          [r, g, b] = [c, 0, x];
+        }
+
         return [
           Math.round((r + m) * 255),
-          Math.round((g + m) * 255), 
-          Math.round((b + m) * 255)
+          Math.round((g + m) * 255),
+          Math.round((b + m) * 255),
         ];
-      }
-
-      // For each pane, convert its HSL to an RGB color in [0..1].
-      function paneToRgb(pane) {
-        return hslToRgb(pane.hsl.h, pane.hsl.s, pane.hsl.l);
       }
 
       // "screen" blend formula: out = 1 - (1 - A)*(1 - B)
@@ -122,7 +124,7 @@
           G = 0,
           B = 0;
         for (let p of panes) {
-          let { r, g, b } = paneToRgb(p);
+          let { r, g, b } = p.rgb;
           R = screenChannel(R, r);
           G = screenChannel(G, g);
           B = screenChannel(B, b);
@@ -157,10 +159,10 @@
 
       // -------------------- Mapping Presets --------------------
       const mappingPresets = [
-        { L_low: 20, L_high: 80, H_low: 240, H_high: 60 },
-        { L_low: 20, L_high: 80, H_low: 0, H_high: 60 },
-        { L_low: 15, L_high: 75, H_low: 270, H_high: 30 },
-        { L_low: 25, L_high: 85, H_low: 120, H_high: 60 },
+        { H_low: 240, H_high: 600 }, // Blue to Blue (wraps around)
+        { H_low: 180, H_high: 540 }, // Cyan to Cyan
+        { H_low: 0, H_high: 360 }, // Red to Red
+        { H_low: 120, H_high: 480 }, // Green to Green
       ];
       function randomMapping() {
         return mappingPresets[
@@ -204,15 +206,19 @@
         this.width = width;
         this.height = height;
         this.mapping = mapping;
-        let L =
-          mapping.L_low +
-          (sliderValue / sliderRange) * (mapping.L_high - mapping.L_low);
-        let H =
-          mapping.H_low +
-          (sliderValue / sliderRange) * (mapping.H_high - mapping.H_low);
-        this.hsl = { h: H, s: 100, l: L };
-        this.alpha = 0.5;
-        this.baseFrequency = getFrequencyFromL(L);
+
+        // Calculate hue based on slider value
+        const ratio = sliderValue / sliderRange;
+        const hue = mapping.H_low + ratio * (mapping.H_high - mapping.H_low);
+        this.hsl = { h: hue % 360, s: 100, l: 50 }; // Full saturation, mid lightness
+
+        // Convert to RGB
+        const [r, g, b] = hslToRgb(this.hsl.h, this.hsl.s, this.hsl.l);
+        this.rgb = { r, g, b };
+
+        // Get LAB L value for frequency
+        const [l] = rgbToLab(r, g, b);
+        this.baseFrequency = getFrequencyFromLabL(l);
 
         this.oscillator = audioCtx.createOscillator();
         this.gainNode = audioCtx.createGain();
@@ -226,7 +232,7 @@
         this.slider = null;
       }
       Pane.prototype.draw = function (ctx, visibleArea) {
-        ctx.fillStyle = `hsl(${this.hsl.h}, ${this.hsl.s}%, ${this.hsl.l}%)`;
+        ctx.fillStyle = `rgb(${this.rgb.r}, ${this.rgb.g}, ${this.rgb.b})`;
         ctx.globalAlpha = this.alpha;
         ctx.fillRect(this.x, this.y, this.width, this.height);
         if (visibleArea > 0.001) {
@@ -274,7 +280,7 @@
             ratio * (editingPane.mapping.H_high - editingPane.mapping.H_low);
           editingPane.hsl.l = newL;
           editingPane.hsl.h = newH;
-          editingPane.baseFrequency = getFrequencyFromL(newL);
+          editingPane.baseFrequency = getFrequencyFromLabL(newL);
           if (editingPane.slider) {
             let xVal =
               ((newL - editingPane.mapping.L_low) /
@@ -437,27 +443,36 @@
           slider.min = 0;
           slider.max = sliderRange;
           slider.step = 0.1;
-          let xVal =
-            ((p.hsl.l - p.mapping.L_low) /
-              (p.mapping.L_high - p.mapping.L_low)) *
-            sliderRange;
-          slider.value = xVal;
+
+          // Calculate slider value from current hue
+          const ratio =
+            (p.hsl.h - p.mapping.H_low) / (p.mapping.H_high - p.mapping.H_low);
+          slider.value = ratio * sliderRange;
+
           slider.className = "hue-slider";
           slider.style.left = p.x + "px";
           slider.style.top = p.y + p.height + 5 + "px";
           slider.style.width = p.width + "px";
+
           slider.addEventListener("input", () => {
-            let x = parseFloat(slider.value);
-            let newL =
-              p.mapping.L_low +
-              (x / sliderRange) * (p.mapping.L_high - p.mapping.L_low);
-            let newH =
-              p.mapping.H_low +
-              (x / sliderRange) * (p.mapping.H_high - p.mapping.H_low);
-            p.hsl.l = newL;
-            p.hsl.h = newH;
-            p.baseFrequency = getFrequencyFromL(newL);
+            const x = parseFloat(slider.value);
+            const ratio = x / sliderRange;
+
+            // Update HSL
+            const newHue =
+              (p.mapping.H_low + ratio * (p.mapping.H_high - p.mapping.H_low)) %
+              360;
+            p.hsl.h = newHue;
+
+            // Update RGB
+            const [r, g, b] = hslToRgb(newHue, p.hsl.s, p.hsl.l);
+            p.rgb = { r, g, b };
+
+            // Update frequency based on LAB L
+            const [l] = rgbToLab(r, g, b);
+            p.baseFrequency = getFrequencyFromLabL(l);
           });
+
           document.body.appendChild(slider);
           p.slider = slider;
         }
@@ -658,17 +673,19 @@
                 finalG = 0,
                 finalB = 0;
               for (let p of covering) {
-                let { r, g, b } = paneToRgb(p);
-                finalR = screenChannel(finalR, r);
-                finalG = screenChannel(finalG, g);
-                finalB = screenChannel(finalB, b);
+                let { r, g, b } = p.rgb;
+                // Normalize RGB values to [0,1] for blending
+                finalR = screenChannel(finalR, r / 255);
+                finalG = screenChannel(finalG, g / 255);
+                finalB = screenChannel(finalB, b / 255);
               }
               compositeRegions[key].area += cellArea;
               compositeRegions[key].sumX += sampleX * cellArea;
               compositeRegions[key].sumY += sampleY * cellArea;
-              compositeRegions[key].sumR += finalR * cellArea;
-              compositeRegions[key].sumG += finalG * cellArea;
-              compositeRegions[key].sumB += finalB * cellArea;
+              // Store the blended RGB values back in [0,255] range
+              compositeRegions[key].sumR += finalR * 255 * cellArea;
+              compositeRegions[key].sumG += finalG * 255 * cellArea;
+              compositeRegions[key].sumB += finalB * 255 * cellArea;
             }
           }
         }
@@ -705,9 +722,10 @@
           let avgR = region.sumR / area;
           let avgG = region.sumG / area;
           let avgB = region.sumB / area;
-          // convert to HSL => L => freq
-          let { h, s, l } = rgbToHsl(avgR, avgG, avgB);
-          let compFreq = getFrequencyFromL(l);
+
+          // Convert directly to LAB and use L value for frequency
+          const [l] = rgbToLab(avgR, avgG, avgB);
+          let compFreq = getFrequencyFromLabL(l);
           let compVol = 0.05 * (area / referenceArea);
           compVol = Math.min(compVol, 0.2);
           if (!compositeOscillators[key]) {
@@ -789,28 +807,35 @@
       // -------------------- Color Space Conversion Functions --------------------
       function rgbToLab(r, g, b) {
         // First convert RGB to XYZ
-        r /= 255; g /= 255; b /= 255;
-        
+        r /= 255;
+        g /= 255;
+        b /= 255;
+
         // Assume sRGB
         r = r > 0.04045 ? Math.pow((r + 0.055) / 1.055, 2.4) : r / 12.92;
         g = g > 0.04045 ? Math.pow((g + 0.055) / 1.055, 2.4) : g / 12.92;
         b = b > 0.04045 ? Math.pow((b + 0.055) / 1.055, 2.4) : b / 12.92;
-        
+
         // Convert to XYZ
         const x = r * 0.4124564 + g * 0.3575761 + b * 0.1804375;
-        const y = r * 0.2126729 + g * 0.7151522 + b * 0.0721750;
-        const z = r * 0.0193339 + g * 0.1191920 + b * 0.9503041;
-        
+        const y = r * 0.2126729 + g * 0.7151522 + b * 0.072175;
+        const z = r * 0.0193339 + g * 0.119192 + b * 0.9503041;
+
         // Convert XYZ to Lab
-        const xn = 0.95047, yn = 1.0, zn = 1.08883;
-        const fx = x > 0.008856 ? Math.pow(x/xn, 1/3) : (7.787 * x/xn) + 16/116;
-        const fy = y > 0.008856 ? Math.pow(y/yn, 1/3) : (7.787 * y/yn) + 16/116;
-        const fz = z > 0.008856 ? Math.pow(z/zn, 1/3) : (7.787 * z/zn) + 16/116;
-        
+        const xn = 0.95047,
+          yn = 1.0,
+          zn = 1.08883;
+        const fx =
+          x > 0.008856 ? Math.pow(x / xn, 1 / 3) : (7.787 * x) / xn + 16 / 116;
+        const fy =
+          y > 0.008856 ? Math.pow(y / yn, 1 / 3) : (7.787 * y) / yn + 16 / 116;
+        const fz =
+          z > 0.008856 ? Math.pow(z / zn, 1 / 3) : (7.787 * z) / zn + 16 / 116;
+
         return [
-          (116 * fy) - 16,    // L
-          500 * (fx - fy),    // a
-          200 * (fy - fz)     // b
+          116 * fy - 16, // L
+          500 * (fx - fy), // a
+          200 * (fy - fz), // b
         ];
       }
 

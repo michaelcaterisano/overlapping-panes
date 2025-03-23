@@ -163,9 +163,9 @@
       // -------------------- Mapping Presets --------------------
       const mappingPresets = [
         { H_low: 240, H_high: 600 }, // Blue to Blue (wraps around)
-        { H_low: 180, H_high: 540 }, // Cyan to Cyan
-        { H_low: 0, H_high: 360 }, // Red to Red
-        { H_low: 120, H_high: 480 }, // Green to Green
+        // { H_low: 180, H_high: 540 }, // Cyan to Cyan
+        // { H_low: 0, H_high: 360 }, // Red to Red
+        // { H_low: 120, H_high: 480 }, // Green to Green
       ];
       function randomMapping() {
         return mappingPresets[
@@ -196,9 +196,9 @@
       let resizing = false,
         resizeOffsetX = 0,
         resizeOffsetY = 0;
-      let resizeMargin = 10;
+      let resizeMargin = 30;
       if ("ontouchstart" in window || navigator.maxTouchPoints > 0) {
-        resizeMargin = 100;
+        resizeMargin = 30;
       }
       let paneIdCounter = 0;
 
@@ -448,8 +448,12 @@
           slider.step = 0.1;
 
           // Calculate slider value from current hue
-          const ratio =
-            (p.hsl.h - p.mapping.H_low) / (p.mapping.H_high - p.mapping.H_low);
+          let currentHue = p.hsl.h;
+          // Unwrap the hue if it's less than H_low
+          if (currentHue < p.mapping.H_low) {
+            currentHue += 360;
+          }
+          const ratio = (currentHue - p.mapping.H_low) / (p.mapping.H_high - p.mapping.H_low);
           slider.value = ratio * sliderRange;
 
           slider.className = "hue-slider";
@@ -474,6 +478,22 @@
             // Update frequency based on LAB L
             const [l] = rgbToLab(r, g, b);
             p.baseFrequency = getFrequencyFromLabL(l);
+          });
+
+          // Add touchend event listener to remove slider
+          slider.addEventListener("touchend", () => {
+            setTimeout(() => {
+              document.body.removeChild(slider);
+              p.slider = null;
+            }, 500); // Small delay to ensure the value is set
+          });
+
+          // Add mouseup event listener to remove slider
+          slider.addEventListener("mouseup", () => {
+            setTimeout(() => {
+              document.body.removeChild(slider);
+              p.slider = null;
+            }, 500); // Small delay to ensure the value is set
           });
 
           document.body.appendChild(slider);
@@ -532,8 +552,8 @@
                 toggleHueSlider(p);
               } else {
                 if (
-                  touchX >= p.x + p.width - 30 &&
-                  touchY >= p.y + p.height - 30
+                  touchX >= p.x + p.width - resizeMargin * 2 &&
+                  touchY >= p.y + p.height - resizeMargin * 2
                 ) {
                   selectedPane = p;
                   resizing = true;

@@ -209,6 +209,7 @@
         this.width = width;
         this.height = height;
         this.mapping = mapping;
+        this.alpha = 0.8;
 
         // Calculate hue based on slider value
         const ratio = sliderValue / sliderRange;
@@ -236,8 +237,9 @@
       }
       Pane.prototype.draw = function (ctx, visibleArea) {
         ctx.fillStyle = `rgb(${this.rgb.r}, ${this.rgb.g}, ${this.rgb.b})`;
-        ctx.globalAlpha = this.alpha;
+        ctx.globalAlpha = 0.8;
         ctx.fillRect(this.x, this.y, this.width, this.height);
+        ctx.globalAlpha = 1.0;
         if (visibleArea > 0.001) {
           ctx.fillStyle = "white";
           ctx.font = "16px sans-serif";

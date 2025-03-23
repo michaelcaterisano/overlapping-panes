@@ -78,9 +78,12 @@
 
     <script>
       // -------------------- Frequency & Color Helpers --------------------
-      // Map L in [0..100] to freq in [200..1000].
+      // Map L from actual range [30..90] to freq in [100..1000].
       function getFrequencyFromLabL(labL) {
-        return 200 + (labL / 100) * 800;
+        // Normalize L from [30..90] to [0..1]
+        const normalizedL = (labL - 30) / (90 - 30);
+        // Map [0..1] to [100..1000]
+        return 100 + normalizedL * 900;
       }
 
       // Convert an HSL color (h in [0..360], s,l in [0..100]) to RGB [0..1].

@@ -110,7 +110,7 @@
       const AudioContext = window.AudioContext || window.webkitAudioContext;
       const audioCtx = new AudioContext();
 
-      // "Last" variables declared once.
+      // "Last" variables declared only once.
       let lastCompositeUpdate = 0;
       let lastCompositeRegions = {};
       let lastTap = 0;
@@ -263,6 +263,7 @@
           compositePalette.appendChild(swatch);
         }
       }
+      // Update composite palette every 500ms
       setInterval(() => {
         updateCompositePalette(lastCompositeRegions);
       }, 500);
@@ -458,9 +459,9 @@
               sampleX >= p.x && sampleX <= p.x + p.width &&
               sampleY >= p.y && sampleY <= p.y + p.height
             );
-            if (covering.length === 1)
+            if (covering.length === 1) {
               indiv[covering[0].id] += cellArea;
-            else if (covering.length >= 2) {
+            } else if (covering.length >= 2) {
               let key = covering.map(p => p.id).sort((a, b) => a - b).join(",");
               if (!compRegions[key])
                 compRegions[key] = { area: 0, sumX: 0, sumY: 0, sumR: 0, sumG: 0, sumB: 0 };
@@ -489,19 +490,19 @@
           p.draw(ctx, indiv[p.id]);
         });
 
-        // Composite oscillators (sound blending)
+        // Composite oscillators (sound blending) & frequency display
         for (let key in compRegions) {
-          const region = compRegions[key],
-                area = region.area;
-          const avgR = region.sumR / area,
-                avgG = region.sumG / area,
-                avgB = region.sumB / area;
+          const region = compRegions[key];
+          const area = region.area;
+          const avgR = region.sumR / area;
+          const avgG = region.sumG / area;
+          const avgB = region.sumB / area;
           const [L] = rgbToLab(avgR, avgG, avgB);
           const compFreq = getFrequencyFromLabL(L);
           const compVol = Math.min(0.05 * (area / refArea), 0.2);
           if (!compositeOscillators[key]) {
-            const osc = audioCtx.createOscillator(),
-                  gain = audioCtx.createGain();
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
             osc.type = "sine";
             osc.frequency.value = compFreq;
             gain.gain.value = 0.0001;
@@ -517,6 +518,12 @@
             c.osc.frequency.setTargetAtTime(compFreq, t, 0.05);
             c.gain.gain.setTargetAtTime(compVol, t, 0.05);
           }
+          // Draw composite frequency text
+          const centroidX = region.sumX / area;
+          const centroidY = region.sumY / area;
+          ctx.fillStyle = "white";
+          ctx.font = "16px sans-serif";
+          ctx.fillText(compFreq.toFixed(2) + " Hz", centroidX - 30, centroidY);
         }
         for (let key in compositeOscillators) {
           if (!(key in compRegions)) {
@@ -534,17 +541,18 @@
         }
 
         // Perfect Fifth Detection
-        const perfectFifth = 1.5, tolerance = 0.01;
+        const perfectFifth = 1.5;
+        const tolerance = 0.01;
         for (let i = 0; i < panes.length; i++) {
           for (let j = i + 1; j < panes.length; j++) {
-            const f1 = panes[i].osc.frequency.value,
-                  f2 = panes[j].osc.frequency.value,
-                  ratio = Math.max(f1, f2) / Math.min(f1, f2);
+            const f1 = panes[i].osc.frequency.value;
+            const f2 = panes[j].osc.frequency.value;
+            const ratio = Math.max(f1, f2) / Math.min(f1, f2);
             if (Math.abs(ratio - perfectFifth) < tolerance) {
-              const x1 = panes[i].x + panes[i].width / 2,
-                    y1 = panes[i].y + panes[i].height / 2,
-                    x2 = panes[j].x + panes[j].width / 2,
-                    y2 = panes[j].y + panes[j].height / 2;
+              const x1 = panes[i].x + panes[i].width / 2;
+              const y1 = panes[i].y + panes[i].height / 2;
+              const x2 = panes[j].x + panes[j].width / 2;
+              const y2 = panes[j].y + panes[j].height / 2;
               ctx.strokeStyle = "white";
               ctx.lineWidth = 3;
               ctx.beginPath();
@@ -558,11 +566,12 @@
       animate();
 
       // ---- Touch Event Listeners ----
+      let tapTimeout, longPressTimeout;
       canvas.addEventListener("touchstart", (e) => {
         e.preventDefault();
         if (audioCtx.state === "suspended") audioCtx.resume();
-        const touch = e.touches[0],
-              rect = canvas.getBoundingClientRect();
+        const touch = e.touches[0];
+        const rect = canvas.getBoundingClientRect();
         const x = touch.clientX - rect.left;
         const y = touch.clientY - rect.top;
         let p = panes.find(p => p.contains(x, y));
@@ -616,8 +625,8 @@
       canvas.addEventListener("touchmove", (e) => {
         e.preventDefault();
         clearTimeout(longPressTimeout);
-        const touch = e.touches[0],
-              rect = canvas.getBoundingClientRect();
+        const touch = e.touches[0];
+        const rect = canvas.getBoundingClientRect();
         const x = touch.clientX - rect.left;
         const y = touch.clientY - rect.top;
         if (selectedPane) {

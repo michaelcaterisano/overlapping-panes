@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
   <head>
-    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Overlapping Panes</title>
     <style>
       html,
@@ -42,13 +42,48 @@
         }
         .hue-slider::-webkit-slider-thumb,
         .hue-slider::-moz-range-thumb {
-          width: 32px; 
-          height: 32px; 
+          width: 32px;
+          height: 32px;
         }
+      }
+      #palette {
+        position: absolute;
+        top: 10px;
+        left: 10px;
+        display: flex;
+        gap: 6px;
+        z-index: 300;
+        padding: 4px;
+        background: rgba(0, 0, 0, 0.4);
+        border-radius: 8px;
+      }
+      .swatch {
+        width: 30px;
+        height: 30px;
+        border: 2px solid white;
+        border-radius: 4px;
+        cursor: pointer;
+      }
+
+      #composite-palette {
+        position: absolute;
+        top: 50px;
+        left: 10px;
+        display: flex;
+        gap: 6px;
+        flex-wrap: wrap;
+        z-index: 300;
+        padding: 4px;
+        background: rgba(0, 0, 0, 0.3);
+        border-radius: 8px;
+        max-width: 90vw;
       }
     </style>
   </head>
   <body>
+    <div id="palette"></div>
+    <div id="composite-palette"></div>
+
     <canvas id="canvas"></canvas>
     <script>
       // ---- Mapping & Global Constants ----
@@ -185,6 +220,44 @@
         resizeOffsetY = 0;
       const resizeMargin = 30;
       let editingPane = null;
+
+      const beautifulHues = [
+        240, // Blue
+        275, // Indigo
+        300, // Violet
+        330, // Magenta
+        0, // Red
+        30, // Orange
+        60, // Yellow
+        90, // Lime
+        150, // Green
+        180, // Cyan
+        210, // Sky Blue
+        240, // Back to Blue
+      ];
+
+      const paletteDiv = document.getElementById("palette");
+      beautifulHues.forEach((hue) => {
+        const swatch = document.createElement("div");
+        swatch.className = "swatch";
+        swatch.style.backgroundColor = `hsl(${hue}, 100%, 50%)`;
+        swatch.dataset.hue = hue;
+        paletteDiv.appendChild(swatch);
+      });
+
+      document.querySelectorAll(".swatch").forEach((swatch) => {
+        swatch.addEventListener("click", () => {
+          const hue = parseInt(swatch.dataset.hue);
+          const mapping = mappingPresets[0];
+          let adjustedHue = hue < mapping.H_low ? hue + 360 : hue;
+          const sliderValue =
+            ((adjustedHue - mapping.H_low) / (mapping.H_high - mapping.H_low)) *
+            sliderRange;
+          const x = Math.random() * (canvas.width - 200);
+          const y = Math.random() * (canvas.height - 200);
+          panes.push(new Pane(x, y, 200, 200, mapping, sliderValue));
+        });
+      });
 
       canvas.addEventListener("mousedown", (e) => {
         if (audioCtx.state === "suspended") audioCtx.resume();

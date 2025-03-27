@@ -4,8 +4,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Overlapping Panes</title>
     <style>
-      html,
-      body {
+      html, body {
         margin: 0;
         padding: 0;
         overflow: hidden;
@@ -64,7 +63,6 @@
         border-radius: 4px;
         cursor: pointer;
       }
-
       #composite-palette {
         position: absolute;
         top: 50px;
@@ -83,20 +81,24 @@
   <body>
     <div id="palette"></div>
     <div id="composite-palette"></div>
-
     <canvas id="canvas"></canvas>
-    <script>
-      // ---- Mapping & Global Constants ----
-      const mappingPresets = [{ H_low: 240, H_high: 600 }];
-      const randomMapping = () =>
-        mappingPresets[Math.floor(Math.random() * mappingPresets.length)];
-      const sliderRange = 800;
+    <script type="module">
+      // Import pure functions from utils.js
+      import { hslToRgb, rgbToLab, rgbToHsl, screenChannel, getFrequencyFromLabL } from "./utils.js";
 
-      // ---- Canvas & Audio Setup ----
-      const canvas = document.getElementById("canvas"),
-        ctx = canvas.getContext("2d");
+      // ---- Global Constants & Variables ----
+      const mappingPresets = [{ H_low: 240, H_high: 600 }];
+      const randomMapping = () => mappingPresets[Math.floor(Math.random() * mappingPresets.length)];
+      const sliderRange = 800;
+      const resizeMargin = 30;
+
+      const canvas = document.getElementById("canvas");
+      const ctx = canvas.getContext("2d");
       canvas.width = window.innerWidth;
       canvas.height = window.innerHeight;
+      let cellWidth = canvas.width / 50,
+          cellHeight = canvas.height / 50,
+          cellArea = cellWidth * cellHeight;
       window.addEventListener("resize", () => {
         canvas.width = window.innerWidth;
         canvas.height = window.innerHeight;
@@ -104,24 +106,32 @@
         cellHeight = canvas.height / 50;
         cellArea = cellWidth * cellHeight;
       });
-      const AudioContext = window.AudioContext || window.webkitAudioContext,
-        audioCtx = new AudioContext();
-      let cellWidth = canvas.width / 50,
-        cellHeight = canvas.height / 50,
-        cellArea = cellWidth * cellHeight;
+
+      const AudioContext = window.AudioContext || window.webkitAudioContext;
+      const audioCtx = new AudioContext();
+
+      // "Last" variables declared once.
+      let lastCompositeUpdate = 0;
+      let lastCompositeRegions = {};
+      let lastTap = 0;
 
       // ---- Pane Class ----
+      // Optionally accepts an override for HSL (used when clicking a composite swatch)
       class Pane {
-        constructor(x, y, width, height, mapping, sliderValue) {
+        constructor(x, y, width, height, mapping, sliderValue, overrideHSL) {
           this.id = Pane.idCounter++;
           this.x = x;
           this.y = y;
           this.width = width;
           this.height = height;
           this.mapping = mapping;
-          const ratio = sliderValue / sliderRange,
-            hue = mapping.H_low + ratio * (mapping.H_high - mapping.H_low);
-          this.hsl = { h: hue % 360, s: 100, l: 50 };
+          if (overrideHSL) {
+            this.hsl = { ...overrideHSL };
+          } else {
+            const ratio = sliderValue / sliderRange;
+            const hue = mapping.H_low + ratio * (mapping.H_high - mapping.H_low);
+            this.hsl = { h: hue % 360, s: 100, l: 50 };
+          }
           const [r, g, b] = hslToRgb(this.hsl.h, this.hsl.s, this.hsl.l);
           this.rgb = { r, g, b };
           const [L] = rgbToLab(r, g, b);
@@ -143,24 +153,15 @@
           ctx.globalAlpha = 1;
           ctx.fillStyle = "white";
           ctx.font = "16px sans-serif";
-          ctx.fillText(
-            this.osc.frequency.value.toFixed(2) + " Hz",
-            this.x + 5,
-            this.y + 20
-          );
+          ctx.fillText(this.osc.frequency.value.toFixed(2) + " Hz", this.x + 5, this.y + 20);
           if (this.slider) {
             this.slider.style.left = this.x + "px";
-            this.slider.style.top = this.y + this.height + 5 + "px";
+            this.slider.style.top = (this.y + this.height + 5) + "px";
             this.slider.style.width = this.width + "px";
           }
         }
         contains(x, y) {
-          return (
-            x >= this.x &&
-            x <= this.x + this.width &&
-            y >= this.y &&
-            y <= this.y + this.height
-          );
+          return x >= this.x && x <= this.x + this.width && y >= this.y && y <= this.y + this.height;
         }
         toggleSlider() {
           if (this.slider) {
@@ -174,27 +175,20 @@
             slider.step = 0.1;
             let currentHue = this.hsl.h;
             if (currentHue < this.mapping.H_low) currentHue += 360;
-            slider.value =
-              ((currentHue - this.mapping.H_low) /
-                (this.mapping.H_high - this.mapping.H_low)) *
-              sliderRange;
+            slider.value = ((currentHue - this.mapping.H_low) / (this.mapping.H_high - this.mapping.H_low)) * sliderRange;
             slider.className = "hue-slider";
             slider.style.left = this.x + "px";
-            slider.style.top = this.y + this.height + 5 + "px";
+            slider.style.top = (this.y + this.height + 5) + "px";
             slider.style.width = this.width + "px";
             slider.addEventListener("input", () => {
-              const newHue =
-                (this.mapping.H_low +
-                  (slider.value / sliderRange) *
-                    (this.mapping.H_high - this.mapping.H_low)) %
-                360;
+              const newHue = (this.mapping.H_low + (slider.value / sliderRange) * (this.mapping.H_high - this.mapping.H_low)) % 360;
               this.hsl.h = newHue;
               const [r, g, b] = hslToRgb(newHue, this.hsl.s, this.hsl.l);
               this.rgb = { r, g, b };
               const [L] = rgbToLab(r, g, b);
               this.baseFrequency = getFrequencyFromLabL(L);
             });
-            ["mouseup", "touchend"].forEach((evt) => {
+            ["mouseup", "touchend"].forEach(evt => {
               slider.addEventListener(evt, () =>
                 setTimeout(() => {
                   if (slider.parentNode) slider.parentNode.removeChild(slider);
@@ -209,33 +203,19 @@
       }
       Pane.idCounter = 0;
 
-      // ---- Global Variables & Frequency Input ----
+      // ---- Global Variables for Panes ----
       let panes = [],
-        selectedPane = null,
-        isDragging = false,
-        dragOffsetX = 0,
-        dragOffsetY = 0,
-        resizing = false,
-        resizeOffsetX = 0,
-        resizeOffsetY = 0;
-      const resizeMargin = 30;
+          selectedPane = null,
+          isDragging = false,
+          dragOffsetX = 0,
+          dragOffsetY = 0,
+          resizing = false,
+          resizeOffsetX = 0,
+          resizeOffsetY = 0;
       let editingPane = null;
 
-      const beautifulHues = [
-        240, // Blue
-        275, // Indigo
-        300, // Violet
-        330, // Magenta
-        0, // Red
-        30, // Orange
-        60, // Yellow
-        90, // Lime
-        150, // Green
-        180, // Cyan
-        210, // Sky Blue
-        240, // Back to Blue
-      ];
-
+      // ---- Palette Setup ----
+      const beautifulHues = [240, 275, 300, 330, 0, 30, 60, 90, 150, 180, 210, 240];
       const paletteDiv = document.getElementById("palette");
       beautifulHues.forEach((hue) => {
         const swatch = document.createElement("div");
@@ -244,68 +224,88 @@
         swatch.dataset.hue = hue;
         paletteDiv.appendChild(swatch);
       });
-
       document.querySelectorAll(".swatch").forEach((swatch) => {
         swatch.addEventListener("click", () => {
           const hue = parseInt(swatch.dataset.hue);
           const mapping = mappingPresets[0];
           let adjustedHue = hue < mapping.H_low ? hue + 360 : hue;
-          const sliderValue =
-            ((adjustedHue - mapping.H_low) / (mapping.H_high - mapping.H_low)) *
-            sliderRange;
+          const sliderValue = ((adjustedHue - mapping.H_low) / (mapping.H_high - mapping.H_low)) * sliderRange;
           const x = Math.random() * (canvas.width - 200);
           const y = Math.random() * (canvas.height - 200);
           panes.push(new Pane(x, y, 200, 200, mapping, sliderValue));
         });
       });
 
+      // ---- Composite Palette Update (Throttled) ----
+      function updateCompositePalette(compRegions) {
+        const compositePalette = document.getElementById("composite-palette");
+        compositePalette.innerHTML = ""; // Clear old swatches
+        for (let key in compRegions) {
+          const region = compRegions[key],
+                area = region.area;
+          const avgR = region.sumR / area,
+                avgG = region.sumG / area,
+                avgB = region.sumB / area;
+          const [compHue, compS, compL] = rgbToHsl(avgR, avgG, avgB);
+          const compFreq = getFrequencyFromLabL(compL);
+          const swatch = document.createElement("div");
+          swatch.className = "swatch";
+          swatch.style.backgroundColor = `rgb(${Math.round(avgR)}, ${Math.round(avgG)}, ${Math.round(avgB)})`;
+          swatch.title = `${compFreq.toFixed(2)} Hz`;
+          swatch.addEventListener("click", () => {
+            const mapping = mappingPresets[0];
+            let adjustedHue = compHue < mapping.H_low ? compHue + 360 : compHue;
+            const sliderValue = ((adjustedHue - mapping.H_low) / (mapping.H_high - mapping.H_low)) * sliderRange;
+            const x = Math.random() * (canvas.width - 200);
+            const y = Math.random() * (canvas.height - 200);
+            panes.push(new Pane(x, y, 200, 200, mapping, sliderValue, { h: compHue, s: compS, l: compL }));
+          });
+          compositePalette.appendChild(swatch);
+        }
+      }
+      setInterval(() => {
+        updateCompositePalette(lastCompositeRegions);
+      }, 500);
+
+      // ---- Mouse Event Listeners ----
       canvas.addEventListener("mousedown", (e) => {
         if (audioCtx.state === "suspended") audioCtx.resume();
-        const rect = canvas.getBoundingClientRect(),
-          x = e.clientX - rect.left,
-          y = e.clientY - rect.top;
-        for (let i = panes.length - 1; i >= 0; i--) {
-          const p = panes[i];
-          if (p.contains(x, y)) {
-            if (
-              x >= p.x + p.width - resizeMargin &&
-              y >= p.y + p.height - resizeMargin
-            ) {
-              selectedPane = p;
-              resizing = true;
-              resizeOffsetX = p.x + p.width - x;
-              resizeOffsetY = p.y + p.height - y;
-            } else {
-              selectedPane = p;
-              isDragging = true;
-              dragOffsetX = x - p.x;
-              dragOffsetY = y - p.y;
-            }
-            // Bring selected pane to front
-            panes.splice(i, 1);
-            panes.push(p);
-            break;
+        const rect = canvas.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+        const overlapping = panes.filter(p => p.contains(x, y));
+        if (overlapping.length > 0) {
+          selectedPane = overlapping[overlapping.length - 1];
+          if (x >= selectedPane.x + selectedPane.width - resizeMargin &&
+              y >= selectedPane.y + selectedPane.height - resizeMargin) {
+            resizing = true;
+            resizeOffsetX = selectedPane.x + selectedPane.width - x;
+            resizeOffsetY = selectedPane.y + selectedPane.height - y;
+          } else {
+            isDragging = true;
+            dragOffsetX = x - selectedPane.x;
+            dragOffsetY = y - selectedPane.y;
+          }
+          const idx = panes.indexOf(selectedPane);
+          if (idx !== -1) {
+            panes.splice(idx, 1);
+            panes.push(selectedPane);
           }
         }
       });
-
       canvas.addEventListener("mousemove", (e) => {
         if (!selectedPane) return;
-        const rect = canvas.getBoundingClientRect(),
-          x = e.clientX - rect.left,
-          y = e.clientY - rect.top;
+        const rect = canvas.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
         if (resizing) {
           selectedPane.width = Math.max(50, x - selectedPane.x + resizeOffsetX);
-          selectedPane.height = Math.max(
-            50,
-            y - selectedPane.y + resizeOffsetY
-          );
+          selectedPane.height = Math.max(50, y - selectedPane.y + resizeOffsetY);
         } else if (isDragging) {
           selectedPane.x = x - dragOffsetX;
           selectedPane.y = y - dragOffsetY;
         }
       });
-
       canvas.addEventListener("mouseup", () => {
         selectedPane = null;
         isDragging = false;
@@ -316,42 +316,32 @@
         isDragging = false;
         resizing = false;
       });
-
       canvas.addEventListener("dblclick", (e) => {
-        const rect = canvas.getBoundingClientRect(),
-          x = e.clientX - rect.left,
-          y = e.clientY - rect.top;
-        let p = panes.find((p) => p.contains(x, y));
-        if (p) p.toggleSlider();
-        else {
+        const rect = canvas.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+        let p = panes.find(p => p.contains(x, y));
+        if (p) {
+          p.toggleSlider();
+        } else {
           const rand = (min, max) => min + Math.random() * (max - min);
-          let width = rand(100, 300),
-            height = rand(100, 300),
-            xPos = Math.min(x - width / 2, canvas.width - width),
-            yPos = Math.min(y - height / 2, canvas.height - height);
-          panes.push(
-            new Pane(
-              xPos,
-              yPos,
-              width,
-              height,
-              randomMapping(),
-              Math.random() * sliderRange
-            )
-          );
+          let width = rand(100, 300);
+          let height = rand(100, 300);
+          let xPos = Math.min(x - width / 2, canvas.width - width);
+          let yPos = Math.min(y - height / 2, canvas.height - height);
+          panes.push(new Pane(xPos, yPos, width, height, randomMapping(), Math.random() * sliderRange));
         }
       });
-
       canvas.addEventListener("contextmenu", (e) => {
         e.preventDefault();
-        const rect = canvas.getBoundingClientRect(),
-          x = e.clientX - rect.left,
-          y = e.clientY - rect.top;
+        const rect = canvas.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
         for (let i = panes.length - 1; i >= 0; i--) {
           const p = panes[i];
           if (p.contains(x, y)) {
             if (p.slider) document.body.removeChild(p.slider);
-            let t = audioCtx.currentTime;
+            const t = audioCtx.currentTime;
             p.gain.gain.cancelScheduledValues(t);
             p.gain.gain.setValueAtTime(p.gain.gain.value, t);
             p.gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.05);
@@ -366,125 +356,88 @@
         }
       });
 
-      // Minimal touch support (similar to mouse)
-      let lastTap = 0,
-        tapTimeout,
-        longPressTimeout;
-      canvas.addEventListener(
-        "touchstart",
-        (e) => {
-          e.preventDefault();
-          if (audioCtx.state === "suspended") audioCtx.resume();
-          const touch = e.touches[0],
-            rect = canvas.getBoundingClientRect(),
-            x = touch.clientX - rect.left,
-            y = touch.clientY - rect.top;
+      // ---- Touch Event Listeners ----
+      canvas.addEventListener("touchstart", (e) => {
+        e.preventDefault();
+        if (audioCtx.state === "suspended") audioCtx.resume();
+        const touch = e.touches[0],
+              rect = canvas.getBoundingClientRect();
+        const x = touch.clientX - rect.left;
+        const y = touch.clientY - rect.top;
+        let p = panes.find(p => p.contains(x, y));
+        if (p) {
           longPressTimeout = setTimeout(() => {
-            let p = panes.find((p) => p.contains(x, y));
-            if (p) {
-              if (p.slider) document.body.removeChild(p.slider);
-              p.gain.gain.setValueAtTime(
-                p.gain.gain.value,
-                audioCtx.currentTime
-              );
-              p.gain.gain.exponentialRampToValueAtTime(
-                0.0001,
-                audioCtx.currentTime + 0.03
-              );
-              setTimeout(() => {
-                p.osc.stop();
-                p.osc.disconnect();
-                p.gain.disconnect();
-              }, 500);
-              panes.splice(panes.indexOf(p), 1);
-            }
-          }, 800);
-          let p = panes.find((p) => p.contains(x, y));
-          if (p) {
-            if (Date.now() - lastTap < 300) {
-              clearTimeout(tapTimeout);
-              clearTimeout(longPressTimeout);
-              p.toggleSlider();
-            } else {
-              if (
-                x >= p.x + p.width - resizeMargin * 2 &&
-                y >= p.y + p.height - resizeMargin * 2
-              ) {
-                selectedPane = p;
-                resizing = true;
-                resizeOffsetX = p.x + p.width - x;
-                resizeOffsetY = p.y + p.height - y;
-              } else {
-                selectedPane = p;
-                isDragging = true;
-                dragOffsetX = x - p.x;
-                dragOffsetY = y - p.y;
-              }
-            }
+            if (p.slider) document.body.removeChild(p.slider);
+            p.gain.gain.setValueAtTime(p.gain.gain.value, audioCtx.currentTime);
+            p.gain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 0.03);
+            setTimeout(() => {
+              p.osc.stop();
+              p.osc.disconnect();
+              p.gain.disconnect();
+            }, 500);
             panes.splice(panes.indexOf(p), 1);
-            panes.push(p);
+          }, 800);
+        } else {
+          clearTimeout(longPressTimeout);
+        }
+        if (p) {
+          if (Date.now() - lastTap < 300) {
+            clearTimeout(tapTimeout);
+            clearTimeout(longPressTimeout);
+            p.toggleSlider();
           } else {
-            if (Date.now() - lastTap < 300) {
-              panes.push(
-                new Pane(
-                  x - 100,
-                  y - 100,
-                  200,
-                  200,
-                  randomMapping(),
-                  Math.random() * sliderRange
-                )
-              );
+            if (x >= p.x + p.width - resizeMargin * 2 && y >= p.y + p.height - resizeMargin * 2) {
+              selectedPane = p;
+              resizing = true;
+              resizeOffsetX = p.x + p.width - x;
+              resizeOffsetY = p.y + p.height - y;
             } else {
-              tapTimeout = setTimeout(() => {}, 300);
+              selectedPane = p;
+              isDragging = true;
+              dragOffsetX = x - p.x;
+              dragOffsetY = y - p.y;
+            }
+            const idx = panes.indexOf(p);
+            if (idx !== -1) {
+              panes.splice(idx, 1);
+              panes.push(p);
             }
           }
-          lastTap = Date.now();
-        },
-        { passive: false }
-      );
-
-      canvas.addEventListener(
-        "touchmove",
-        (e) => {
-          e.preventDefault();
-          clearTimeout(longPressTimeout);
-          const touch = e.touches[0],
-            rect = canvas.getBoundingClientRect(),
-            x = touch.clientX - rect.left,
-            y = touch.clientY - rect.top;
-          if (selectedPane) {
-            if (resizing) {
-              selectedPane.width = Math.max(
-                50,
-                x - selectedPane.x + resizeOffsetX
-              );
-              selectedPane.height = Math.max(
-                50,
-                y - selectedPane.y + resizeOffsetY
-              );
-            } else if (isDragging) {
-              selectedPane.x = x - dragOffsetX;
-              selectedPane.y = y - dragOffsetY;
-            }
+        } else {
+          if (Date.now() - lastTap < 300) {
+            panes.push(new Pane(x - 100, y - 100, 200, 200, randomMapping(), Math.random() * sliderRange));
+          } else {
+            tapTimeout = setTimeout(() => {}, 300);
           }
-        },
-        { passive: false }
-      );
+        }
+        lastTap = Date.now();
+      }, { passive: false });
+      canvas.addEventListener("touchmove", (e) => {
+        e.preventDefault();
+        clearTimeout(longPressTimeout);
+        const touch = e.touches[0],
+              rect = canvas.getBoundingClientRect();
+        const x = touch.clientX - rect.left;
+        const y = touch.clientY - rect.top;
+        if (selectedPane) {
+          if (resizing) {
+            selectedPane.width = Math.max(50, x - selectedPane.x + resizeOffsetX);
+            selectedPane.height = Math.max(50, y - selectedPane.y + resizeOffsetY);
+          } else if (isDragging) {
+            selectedPane.x = x - dragOffsetX;
+            selectedPane.y = y - dragOffsetY;
+          }
+        }
+      }, { passive: false });
+      canvas.addEventListener("touchend", (e) => {
+        e.preventDefault();
+        clearTimeout(longPressTimeout);
+        selectedPane = null;
+        isDragging = false;
+        resizing = false;
+      }, { passive: false });
 
-      canvas.addEventListener(
-        "touchend",
-        (e) => {
-          e.preventDefault();
-          clearTimeout(longPressTimeout);
-          selectedPane = null;
-          isDragging = false;
-          resizing = false;
-        },
-        { passive: false }
-      );
-
-      // ---- Composite Sound & Animation ----
+      // ---- Animation Loop ----
       let compositeOscillators = {};
       function animate() {
         requestAnimationFrame(animate);
@@ -495,38 +448,24 @@
         ctx.globalCompositeOperation = "lighter";
         const t = audioCtx.currentTime;
         let indiv = {};
-        panes.forEach((p) => (indiv[p.id] = 0));
+        panes.forEach(p => (indiv[p.id] = 0));
         let compRegions = {};
         for (let i = 0; i < 50; i++) {
           for (let j = 0; j < 50; j++) {
-            const sampleX = (i + 0.5) * cellWidth,
-              sampleY = (j + 0.5) * cellHeight;
-            const covering = panes.filter(
-              (p) =>
-                sampleX >= p.x &&
-                sampleX <= p.x + p.width &&
-                sampleY >= p.y &&
-                sampleY <= p.y + p.height
+            const sampleX = (i + 0.5) * cellWidth;
+            const sampleY = (j + 0.5) * cellHeight;
+            const covering = panes.filter(p =>
+              sampleX >= p.x && sampleX <= p.x + p.width &&
+              sampleY >= p.y && sampleY <= p.y + p.height
             );
-            if (covering.length === 1) indiv[covering[0].id] += cellArea;
+            if (covering.length === 1)
+              indiv[covering[0].id] += cellArea;
             else if (covering.length >= 2) {
-              let key = covering
-                .map((p) => p.id)
-                .sort((a, b) => a - b)
-                .join(",");
+              let key = covering.map(p => p.id).sort((a, b) => a - b).join(",");
               if (!compRegions[key])
-                compRegions[key] = {
-                  area: 0,
-                  sumX: 0,
-                  sumY: 0,
-                  sumR: 0,
-                  sumG: 0,
-                  sumB: 0,
-                };
-              let r = 0,
-                g = 0,
-                b = 0;
-              covering.forEach((p) => {
+                compRegions[key] = { area: 0, sumX: 0, sumY: 0, sumR: 0, sumG: 0, sumB: 0 };
+              let r = 0, g = 0, b = 0;
+              covering.forEach(p => {
                 r = screenChannel(r, p.rgb.r / 255);
                 g = screenChannel(g, p.rgb.g / 255);
                 b = screenChannel(b, p.rgb.b / 255);
@@ -540,25 +479,29 @@
             }
           }
         }
+        lastCompositeRegions = compRegions; // Cache composite regions
+
         const refArea = 30000;
-        panes.forEach((p) => {
+        panes.forEach(p => {
           let vol = Math.min(0.05 * (indiv[p.id] / refArea), 0.2);
           p.gain.gain.setTargetAtTime(vol, t, 0.05);
           p.osc.frequency.setTargetAtTime(p.baseFrequency, t, 0.05);
           p.draw(ctx, indiv[p.id]);
         });
+
+        // Composite oscillators (sound blending)
         for (let key in compRegions) {
           const region = compRegions[key],
-            area = region.area;
+                area = region.area;
           const avgR = region.sumR / area,
-            avgG = region.sumG / area,
-            avgB = region.sumB / area;
+                avgG = region.sumG / area,
+                avgB = region.sumB / area;
           const [L] = rgbToLab(avgR, avgG, avgB);
           const compFreq = getFrequencyFromLabL(L);
           const compVol = Math.min(0.05 * (area / refArea), 0.2);
           if (!compositeOscillators[key]) {
             const osc = audioCtx.createOscillator(),
-              gain = audioCtx.createGain();
+                  gain = audioCtx.createGain();
             osc.type = "sine";
             osc.frequency.value = compFreq;
             gain.gain.value = 0.0001;
@@ -574,11 +517,6 @@
             c.osc.frequency.setTargetAtTime(compFreq, t, 0.05);
             c.gain.gain.setTargetAtTime(compVol, t, 0.05);
           }
-          const centroidX = region.sumX / area,
-            centroidY = region.sumY / area;
-          ctx.fillStyle = "white";
-          ctx.font = "16px sans-serif";
-          ctx.fillText(compFreq.toFixed(2) + " Hz", centroidX - 30, centroidY);
         }
         for (let key in compositeOscillators) {
           if (!(key in compRegions)) {
@@ -596,18 +534,17 @@
         }
 
         // Perfect Fifth Detection
-        const perfectFifth = 1.5,
-          tolerance = 0.01;
+        const perfectFifth = 1.5, tolerance = 0.01;
         for (let i = 0; i < panes.length; i++) {
           for (let j = i + 1; j < panes.length; j++) {
-            const f1 = panes[i].osc.frequency.value;
-            const f2 = panes[j].osc.frequency.value;
-            const ratio = Math.max(f1, f2) / Math.min(f1, f2);
+            const f1 = panes[i].osc.frequency.value,
+                  f2 = panes[j].osc.frequency.value,
+                  ratio = Math.max(f1, f2) / Math.min(f1, f2);
             if (Math.abs(ratio - perfectFifth) < tolerance) {
-              const x1 = panes[i].x + panes[i].width / 2;
-              const y1 = panes[i].y + panes[i].height / 2;
-              const x2 = panes[j].x + panes[j].width / 2;
-              const y2 = panes[j].y + panes[j].height / 2;
+              const x1 = panes[i].x + panes[i].width / 2,
+                    y1 = panes[i].y + panes[i].height / 2,
+                    x2 = panes[j].x + panes[j].width / 2,
+                    y2 = panes[j].y + panes[j].height / 2;
               ctx.strokeStyle = "white";
               ctx.lineWidth = 3;
               ctx.beginPath();
@@ -620,53 +557,86 @@
       }
       animate();
 
-      // ---- Utility Functions ----
-      const getFrequencyFromLabL = (L) => 100 + ((L - 30) / 60) * 900;
-      function hslToRgb(h, s, l) {
-        s /= 100;
-        l /= 100;
-        const c = (1 - Math.abs(2 * l - 1)) * s,
-          x = c * (1 - Math.abs(((h / 60) % 2) - 1)),
-          m = l - c / 2;
-        let r, g, b;
-        if (h < 60) [r, g, b] = [c, x, 0];
-        else if (h < 120) [r, g, b] = [x, c, 0];
-        else if (h < 180) [r, g, b] = [0, c, x];
-        else if (h < 240) [r, g, b] = [0, x, c];
-        else if (h < 300) [r, g, b] = [x, 0, c];
-        else [r, g, b] = [c, 0, x];
-        return [
-          Math.round((r + m) * 255),
-          Math.round((g + m) * 255),
-          Math.round((b + m) * 255),
-        ];
-      }
-      function rgbToLab(r, g, b) {
-        [r, g, b] = [r, g, b].map((v) => v / 255);
-        r = r > 0.04045 ? Math.pow((r + 0.055) / 1.055, 2.4) : r / 12.92;
-        g = g > 0.04045 ? Math.pow((g + 0.055) / 1.055, 2.4) : g / 12.92;
-        b = b > 0.04045 ? Math.pow((b + 0.055) / 1.055, 2.4) : b / 12.92;
-        const x = r * 0.4124564 + g * 0.3575761 + b * 0.1804375,
-          y = r * 0.2126729 + g * 0.7151522 + b * 0.072175,
-          z = r * 0.0193339 + g * 0.119192 + b * 0.9503041,
-          xn = 0.95047,
-          yn = 1,
-          zn = 1.08883;
-        const fx =
-            x > 0.008856
-              ? Math.pow(x / xn, 1 / 3)
-              : (7.787 * x) / xn + 16 / 116,
-          fy =
-            y > 0.008856
-              ? Math.pow(y / yn, 1 / 3)
-              : (7.787 * y) / yn + 16 / 116,
-          fz =
-            z > 0.008856
-              ? Math.pow(z / zn, 1 / 3)
-              : (7.787 * z) / zn + 16 / 116;
-        return [116 * fy - 16, 500 * (fx - fy), 200 * (fy - fz)];
-      }
-      const screenChannel = (a, b) => 1 - (1 - a) * (1 - b);
+      // ---- Touch Event Listeners ----
+      canvas.addEventListener("touchstart", (e) => {
+        e.preventDefault();
+        if (audioCtx.state === "suspended") audioCtx.resume();
+        const touch = e.touches[0],
+              rect = canvas.getBoundingClientRect();
+        const x = touch.clientX - rect.left;
+        const y = touch.clientY - rect.top;
+        let p = panes.find(p => p.contains(x, y));
+        if (p) {
+          longPressTimeout = setTimeout(() => {
+            if (p.slider) document.body.removeChild(p.slider);
+            p.gain.gain.setValueAtTime(p.gain.gain.value, audioCtx.currentTime);
+            p.gain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 0.03);
+            setTimeout(() => {
+              p.osc.stop();
+              p.osc.disconnect();
+              p.gain.disconnect();
+            }, 500);
+            panes.splice(panes.indexOf(p), 1);
+          }, 800);
+        } else {
+          clearTimeout(longPressTimeout);
+        }
+        if (p) {
+          if (Date.now() - lastTap < 300) {
+            clearTimeout(tapTimeout);
+            clearTimeout(longPressTimeout);
+            p.toggleSlider();
+          } else {
+            if (x >= p.x + p.width - resizeMargin * 2 && y >= p.y + p.height - resizeMargin * 2) {
+              selectedPane = p;
+              resizing = true;
+              resizeOffsetX = p.x + p.width - x;
+              resizeOffsetY = p.y + p.height - y;
+            } else {
+              selectedPane = p;
+              isDragging = true;
+              dragOffsetX = x - p.x;
+              dragOffsetY = y - p.y;
+            }
+            const idx = panes.indexOf(p);
+            if (idx !== -1) {
+              panes.splice(idx, 1);
+              panes.push(p);
+            }
+          }
+        } else {
+          if (Date.now() - lastTap < 300) {
+            panes.push(new Pane(x - 100, y - 100, 200, 200, randomMapping(), Math.random() * sliderRange));
+          } else {
+            tapTimeout = setTimeout(() => {}, 300);
+          }
+        }
+        lastTap = Date.now();
+      }, { passive: false });
+      canvas.addEventListener("touchmove", (e) => {
+        e.preventDefault();
+        clearTimeout(longPressTimeout);
+        const touch = e.touches[0],
+              rect = canvas.getBoundingClientRect();
+        const x = touch.clientX - rect.left;
+        const y = touch.clientY - rect.top;
+        if (selectedPane) {
+          if (resizing) {
+            selectedPane.width = Math.max(50, x - selectedPane.x + resizeOffsetX);
+            selectedPane.height = Math.max(50, y - selectedPane.y + resizeOffsetY);
+          } else if (isDragging) {
+            selectedPane.x = x - dragOffsetX;
+            selectedPane.y = y - dragOffsetY;
+          }
+        }
+      }, { passive: false });
+      canvas.addEventListener("touchend", (e) => {
+        e.preventDefault();
+        clearTimeout(longPressTimeout);
+        selectedPane = null;
+        isDragging = false;
+        resizing = false;
+      }, { passive: false });
     </script>
   </body>
 </html>

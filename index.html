@@ -51,43 +51,42 @@
   <body>
     <canvas id="canvas"></canvas>
     <script>
-      // ---- Global Constants ----
-      const sliderRange = 800;
+      // ---- Global Variables ----
+      const AudioContext = window.AudioContext || window.webkitAudioContext;
+      const audioCtx = new AudioContext();
+      const canvas = document.getElementById("canvas");
+      const ctx = canvas.getContext("2d");
       const resizeMargin = 30;
-      let panes = [],
-        selectedPane = null,
-        isDragging = false,
-        resizing = false,
-        dragOffsetX = 0,
-        dragOffsetY = 0,
-        resizeOffsetX = 0,
-        resizeOffsetY = 0;
+      const sliderRange = 800;
 
-      // Minimal touch support (similar to mouse)
-      let lastTap = 0,
-        tapTimeout,
-        longPressTimeout;
-
-      // ---- Composite Sound & Animation ----
+      let cellArea;
+      let cellHeight;
+      let cellWidth;
       let compositeOscillators = {};
+      let dragOffsetX = 0;
+      let dragOffsetY = 0;
+      let isDragging = false;
+      let lastTap = 0;
+      let longPressTimeout;
+      let panes = [];
+      let resizeOffsetX = 0;
+      let resizeOffsetY = 0;
+      let resizing = false;
+      let selectedPane = null;
+      let tapTimeout;
 
-      // ---- Canvas & Audio Setup ----
-      const canvas = document.getElementById("canvas"),
-        ctx = canvas.getContext("2d");
-      canvas.width = window.innerWidth;
-      canvas.height = window.innerHeight;
-      window.addEventListener("resize", () => {
+      // Resize handler to update canvas dimensions and dependent variables
+      function handleResize() {
         canvas.width = window.innerWidth;
         canvas.height = window.innerHeight;
         cellWidth = canvas.width / 50;
         cellHeight = canvas.height / 50;
         cellArea = cellWidth * cellHeight;
-      });
-      const AudioContext = window.AudioContext || window.webkitAudioContext,
-        audioCtx = new AudioContext();
-      let cellWidth = canvas.width / 50,
-        cellHeight = canvas.height / 50,
-        cellArea = cellWidth * cellHeight;
+      }
+
+      // Attach the resize handler and call it immediately
+      window.addEventListener("resize", handleResize);
+      handleResize();
 
       // ---- Pane Class ----
       class Pane {
@@ -191,18 +190,17 @@
       }
       Pane.idCounter = 0;
 
-      canvas.addEventListener("mousedown", (e) => {
+      // ---- Event Handlers ----
+      function handleMouseDown(e) {
         if (audioCtx.state === "suspended") audioCtx.resume();
-        const rect = canvas.getBoundingClientRect(),
-          x = e.clientX - rect.left,
-          y = e.clientY - rect.top;
+        const rect = canvas.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+
         for (let i = panes.length - 1; i >= 0; i--) {
           const p = panes[i];
           if (p.contains(x, y)) {
-            if (
-              x >= p.x + p.width - resizeMargin &&
-              y >= p.y + p.height - resizeMargin
-            ) {
+            if (x >= p.x + p.width - resizeMargin && y >= p.y + p.height - resizeMargin) {
               selectedPane = p;
               resizing = true;
               resizeOffsetX = p.x + p.width - x;
@@ -213,61 +211,64 @@
               dragOffsetX = x - p.x;
               dragOffsetY = y - p.y;
             }
-            // Bring selected pane to front
             panes.splice(i, 1);
             panes.push(p);
             break;
           }
         }
-      });
-      canvas.addEventListener("mousemove", (e) => {
+      }
+
+      function handleMouseMove(e) {
         if (!selectedPane) return;
-        const rect = canvas.getBoundingClientRect(),
-          x = e.clientX - rect.left,
-          y = e.clientY - rect.top;
+        const rect = canvas.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+
         if (resizing) {
           selectedPane.width = Math.max(50, x - selectedPane.x + resizeOffsetX);
-          selectedPane.height = Math.max(
-            50,
-            y - selectedPane.y + resizeOffsetY
-          );
+          selectedPane.height = Math.max(50, y - selectedPane.y + resizeOffsetY);
         } else if (isDragging) {
           selectedPane.x = x - dragOffsetX;
           selectedPane.y = y - dragOffsetY;
         }
-      });
-      canvas.addEventListener("mouseup", () => {
+      }
+
+      function handleMouseUp() {
         selectedPane = null;
         isDragging = false;
         resizing = false;
-      });
-      canvas.addEventListener("mouseleave", () => {
+      }
+
+      function handleMouseLeave() {
         selectedPane = null;
         isDragging = false;
         resizing = false;
-      });
-      canvas.addEventListener("dblclick", (e) => {
-        const rect = canvas.getBoundingClientRect(),
-          x = e.clientX - rect.left,
-          y = e.clientY - rect.top;
+      }
+
+      function handleDoubleClick(e) {
+        const rect = canvas.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+
         let p = panes.find((p) => p.contains(x, y));
-        if (p) p.toggleSlider();
-        else {
+        if (p) {
+          p.toggleSlider();
+        } else {
           const rand = (min, max) => min + Math.random() * (max - min);
-          let width = rand(100, 300),
-            height = rand(100, 300),
-            xPos = Math.min(x - width / 2, canvas.width - width),
-            yPos = Math.min(y - height / 2, canvas.height - height);
-          panes.push(
-            new Pane(xPos, yPos, width, height, Math.random() * sliderRange)
-          );
+          let width = rand(100, 300);
+          let height = rand(100, 300);
+          let xPos = Math.min(x - width / 2, canvas.width - width);
+          let yPos = Math.min(y - height / 2, canvas.height - height);
+          panes.push(new Pane(xPos, yPos, width, height, Math.random() * sliderRange));
         }
-      });
-      canvas.addEventListener("contextmenu", (e) => {
+      }
+
+      function handleContextMenu(e) {
         e.preventDefault();
-        const rect = canvas.getBoundingClientRect(),
-          x = e.clientX - rect.left,
-          y = e.clientY - rect.top;
+        const rect = canvas.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+
         for (let i = panes.length - 1; i >= 0; i--) {
           const p = panes[i];
           if (p.contains(x, y)) {
@@ -285,116 +286,104 @@
             break;
           }
         }
-      });
-      canvas.addEventListener(
-        "touchstart",
-        (e) => {
-          e.preventDefault();
-          if (audioCtx.state === "suspended") audioCtx.resume();
-          const touch = e.touches[0],
-            rect = canvas.getBoundingClientRect(),
-            x = touch.clientX - rect.left,
-            y = touch.clientY - rect.top;
-          longPressTimeout = setTimeout(() => {
-            let p = panes.find((p) => p.contains(x, y));
-            if (p) {
-              if (p.slider) document.body.removeChild(p.slider);
-              p.gain.gain.setValueAtTime(
-                p.gain.gain.value,
-                audioCtx.currentTime
-              );
-              p.gain.gain.exponentialRampToValueAtTime(
-                0.0001,
-                audioCtx.currentTime + 0.03
-              );
-              setTimeout(() => {
-                p.osc.stop();
-                p.osc.disconnect();
-                p.gain.disconnect();
-              }, 500);
-              panes.splice(panes.indexOf(p), 1);
-            }
-          }, 800);
+      }
+
+      function handleTouchStart(e) {
+        e.preventDefault();
+        if (audioCtx.state === "suspended") audioCtx.resume();
+        const touch = e.touches[0];
+        const rect = canvas.getBoundingClientRect();
+        const x = touch.clientX - rect.left;
+        const y = touch.clientY - rect.top;
+
+        longPressTimeout = setTimeout(() => {
           let p = panes.find((p) => p.contains(x, y));
           if (p) {
-            if (Date.now() - lastTap < 300) {
-              clearTimeout(tapTimeout);
-              clearTimeout(longPressTimeout);
-              p.toggleSlider();
-            } else {
-              if (
-                x >= p.x + p.width - resizeMargin * 2 &&
-                y >= p.y + p.height - resizeMargin * 2
-              ) {
-                selectedPane = p;
-                resizing = true;
-                resizeOffsetX = p.x + p.width - x;
-                resizeOffsetY = p.y + p.height - y;
-              } else {
-                selectedPane = p;
-                isDragging = true;
-                dragOffsetX = x - p.x;
-                dragOffsetY = y - p.y;
-              }
-            }
+            if (p.slider) document.body.removeChild(p.slider);
+            p.gain.gain.setValueAtTime(p.gain.gain.value, audioCtx.currentTime);
+            p.gain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 0.03);
+            setTimeout(() => {
+              p.osc.stop();
+              p.osc.disconnect();
+              p.gain.disconnect();
+            }, 500);
             panes.splice(panes.indexOf(p), 1);
-            panes.push(p);
+          }
+        }, 800);
+
+        let p = panes.find((p) => p.contains(x, y));
+        if (p) {
+          if (Date.now() - lastTap < 300) {
+            clearTimeout(tapTimeout);
+            clearTimeout(longPressTimeout);
+            p.toggleSlider();
           } else {
-            if (Date.now() - lastTap < 300) {
-              const rand = (min, max) => min + Math.random() * (max - min);
-              let width = rand(90, 250),
-                height = rand(90, 250),
-                xPos = Math.min(x - width / 2, canvas.width - width),
-                yPos = Math.min(y - height / 2, canvas.height - height);
-              panes.push(
-                new Pane(xPos, yPos, width, height, Math.random() * sliderRange)
-              );
+            if (x >= p.x + p.width - resizeMargin * 2 && y >= p.y + p.height - resizeMargin * 2) {
+              selectedPane = p;
+              resizing = true;
+              resizeOffsetX = p.x + p.width - x;
+              resizeOffsetY = p.y + p.height - y;
             } else {
-              tapTimeout = setTimeout(() => {}, 300);
+              selectedPane = p;
+              isDragging = true;
+              dragOffsetX = x - p.x;
+              dragOffsetY = y - p.y;
             }
           }
-          lastTap = Date.now();
-        },
-        { passive: false }
-      );
-      canvas.addEventListener(
-        "touchmove",
-        (e) => {
-          e.preventDefault();
-          clearTimeout(longPressTimeout);
-          const touch = e.touches[0],
-            rect = canvas.getBoundingClientRect(),
-            x = touch.clientX - rect.left,
-            y = touch.clientY - rect.top;
-          if (selectedPane) {
-            if (resizing) {
-              selectedPane.width = Math.max(
-                50,
-                x - selectedPane.x + resizeOffsetX
-              );
-              selectedPane.height = Math.max(
-                50,
-                y - selectedPane.y + resizeOffsetY
-              );
-            } else if (isDragging) {
-              selectedPane.x = x - dragOffsetX;
-              selectedPane.y = y - dragOffsetY;
-            }
+          panes.splice(panes.indexOf(p), 1);
+          panes.push(p);
+        } else {
+          if (Date.now() - lastTap < 300) {
+            const rand = (min, max) => min + Math.random() * (max - min);
+            let width = rand(90, 250);
+            let height = rand(90, 250);
+            let xPos = Math.min(x - width / 2, canvas.width - width);
+            let yPos = Math.min(y - height / 2, canvas.height - height);
+            panes.push(new Pane(xPos, yPos, width, height, Math.random() * sliderRange));
+          } else {
+            tapTimeout = setTimeout(() => {}, 300);
           }
-        },
-        { passive: false }
-      );
-      canvas.addEventListener(
-        "touchend",
-        (e) => {
-          e.preventDefault();
-          clearTimeout(longPressTimeout);
-          selectedPane = null;
-          isDragging = false;
-          resizing = false;
-        },
-        { passive: false }
-      );
+        }
+        lastTap = Date.now();
+      }
+
+      function handleTouchMove(e) {
+        e.preventDefault();
+        clearTimeout(longPressTimeout);
+        const touch = e.touches[0];
+        const rect = canvas.getBoundingClientRect();
+        const x = touch.clientX - rect.left;
+        const y = touch.clientY - rect.top;
+
+        if (selectedPane) {
+          if (resizing) {
+            selectedPane.width = Math.max(50, x - selectedPane.x + resizeOffsetX);
+            selectedPane.height = Math.max(50, y - selectedPane.y + resizeOffsetY);
+          } else if (isDragging) {
+            selectedPane.x = x - dragOffsetX;
+            selectedPane.y = y - dragOffsetY;
+          }
+        }
+      }
+
+      function handleTouchEnd(e) {
+        e.preventDefault();
+        clearTimeout(longPressTimeout);
+        selectedPane = null;
+        isDragging = false;
+        resizing = false;
+      }
+
+      // ---- Attach Event Listeners ----
+      canvas.addEventListener("mousedown", handleMouseDown);
+      canvas.addEventListener("mousemove", handleMouseMove);
+      canvas.addEventListener("mouseup", handleMouseUp);
+      canvas.addEventListener("mouseleave", handleMouseLeave);
+      canvas.addEventListener("dblclick", handleDoubleClick);
+      canvas.addEventListener("contextmenu", handleContextMenu);
+      canvas.addEventListener("touchstart", handleTouchStart, { passive: false });
+      canvas.addEventListener("touchmove", handleTouchMove, { passive: false });
+      canvas.addEventListener("touchend", handleTouchEnd, { passive: false });
 
       function animate() {
         requestAnimationFrame(animate);

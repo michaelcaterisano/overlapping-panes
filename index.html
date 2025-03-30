@@ -87,7 +87,7 @@
 
         updateColorAndFrequency(sliderValue) {
           const ratio = sliderValue / sliderRange;
-          const hue = 240 + ratio * 360; // Always blue to blue
+          const hue = ratio * 360; // Hue now ranges from 0 to 360
           this.hsl = { h: hue % 360, s: 100, l: 50 };
           const [r, g, b] = hslToRgb(this.hsl.h, this.hsl.s, this.hsl.l);
           this.rgb = { r, g, b };
@@ -165,13 +165,11 @@
         }
 
         calculateSliderValue() {
-          let currentHue = this.hsl.h;
-          if (currentHue < 240) currentHue += 360;
-          return ((currentHue - 240) / 360) * sliderRange;
+          return (this.hsl.h / 360) * sliderRange; // No offset applied
         }
 
         updateSlider(slider) {
-          const newHue = (240 + (slider.value / sliderRange) * 360) % 360;
+          const newHue = (slider.value / sliderRange) * 360; // No offset applied
           this.hsl.h = newHue;
           const [r, g, b] = hslToRgb(newHue, this.hsl.s, this.hsl.l);
           this.rgb = { r, g, b };

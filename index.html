@@ -83,12 +83,12 @@
       const appState = {
         selectedPane: null,
         isDragging: false,
-        resizing: false,
+        isResizing: false,
         dragOffsetX: 0,
         dragOffsetY: 0,
         resizeOffsetX: 0,
         resizeOffsetY: 0,
-        lastTap: 0,
+        lastTapTime: 0,
         tapTimeout: null,
         longPressTimeout: null,
         panes: [],
@@ -210,44 +210,68 @@
       }
       Pane.idCounter = 0;
 
-      // ---- Event Handlers ----
-      function handleMouseDown(e) {
-        if (audioCtx.state === "suspended") audioCtx.resume();
+      // ---- Utility Functions ----
+      function getCanvasCoordinates(event) {
         const rect = canvas.getBoundingClientRect();
-        const x = e.clientX - rect.left;
-        const y = e.clientY - rect.top;
+        return {
+          x: event.clientX - rect.left,
+          y: event.clientY - rect.top,
+        };
+      }
+
+      function findPaneAtCoordinates(x, y) {
+        return appState.panes.find((pane) => pane.contains(x, y));
+      }
+
+      function createRandomPane(x, y) {
+        const randomSize = (min, max) => min + Math.random() * (max - min);
+        const width = randomSize(MIN_PANE_WIDTH, MAX_PANE_WIDTH);
+        const height = randomSize(MIN_PANE_HEIGHT, MAX_PANE_HEIGHT);
+        const xPos = Math.min(x - width / 2, canvas.width - width);
+        const yPos = Math.min(y - height / 2, canvas.height - height);
+        return new Pane(
+          xPos,
+          yPos,
+          width,
+          height,
+          Math.random() * SLIDER_RANGE
+        );
+      }
+
+      // ---- Event Handlers ----
+      function handleMouseDown(event) {
+        if (audioCtx.state === "suspended") audioCtx.resume();
+        const { x, y } = getCanvasCoordinates(event);
 
         for (let i = appState.panes.length - 1; i >= 0; i--) {
-          const p = appState.panes[i];
-          if (p.contains(x, y)) {
+          const pane = appState.panes[i];
+          if (pane.contains(x, y)) {
             if (
-              x >= p.x + p.width - RESIZE_MARGIN &&
-              y >= p.y + p.height - RESIZE_MARGIN
+              x >= pane.x + pane.width - RESIZE_MARGIN &&
+              y >= pane.y + pane.height - RESIZE_MARGIN
             ) {
-              appState.selectedPane = p;
-              appState.resizing = true;
-              appState.resizeOffsetX = p.x + p.width - x;
-              appState.resizeOffsetY = p.y + p.height - y;
+              appState.selectedPane = pane;
+              appState.isResizing = true;
+              appState.resizeOffsetX = pane.x + pane.width - x;
+              appState.resizeOffsetY = pane.y + pane.height - y;
             } else {
-              appState.selectedPane = p;
+              appState.selectedPane = pane;
               appState.isDragging = true;
-              appState.dragOffsetX = x - p.x;
-              appState.dragOffsetY = y - p.y;
+              appState.dragOffsetX = x - pane.x;
+              appState.dragOffsetY = y - pane.y;
             }
             appState.panes.splice(i, 1);
-            appState.panes.push(p);
-            break;
+            appState.panes.push(pane); // Bring the selected pane to the front
+            return;
           }
         }
       }
 
-      function handleMouseMove(e) {
+      function handleMouseMove(event) {
         if (!appState.selectedPane) return;
-        const rect = canvas.getBoundingClientRect();
-        const x = e.clientX - rect.left;
-        const y = e.clientY - rect.top;
+        const { x, y } = getCanvasCoordinates(event);
 
-        if (appState.resizing) {
+        if (appState.isResizing) {
           appState.selectedPane.width = Math.max(
             MIN_PANE_SIZE,
             x - appState.selectedPane.x + appState.resizeOffsetX
@@ -265,57 +289,46 @@
       function handleMouseUp() {
         appState.selectedPane = null;
         appState.isDragging = false;
-        appState.resizing = false;
+        appState.isResizing = false;
       }
 
       function handleMouseLeave() {
         appState.selectedPane = null;
         appState.isDragging = false;
-        appState.resizing = false;
+        appState.isResizing = false;
       }
 
-      function handleDoubleClick(e) {
-        const rect = canvas.getBoundingClientRect();
-        const x = e.clientX - rect.left;
-        const y = e.clientY - rect.top;
+      function handleDoubleClick(event) {
+        const { x, y } = getCanvasCoordinates(event);
+        const pane = findPaneAtCoordinates(x, y);
 
-        let p = appState.panes.find((p) => p.contains(x, y));
-        if (p) {
-          p.toggleSlider();
+        if (pane) {
+          pane.toggleSlider();
         } else {
-          const rand = (min, max) => min + Math.random() * (max - min);
-          let width = rand(MIN_PANE_WIDTH, MAX_PANE_WIDTH);
-          let height = rand(MIN_PANE_HEIGHT, MAX_PANE_HEIGHT);
-          let xPos = Math.min(x - width / 2, canvas.width - width);
-          let yPos = Math.min(y - height / 2, canvas.height - height);
-          appState.panes.push(
-            new Pane(xPos, yPos, width, height, Math.random() * SLIDER_RANGE)
-          );
+          appState.panes.push(createRandomPane(x, y));
         }
       }
 
-      function handleContextMenu(e) {
-        e.preventDefault();
-        const rect = canvas.getBoundingClientRect();
-        const x = e.clientX - rect.left;
-        const y = e.clientY - rect.top;
+      function handleContextMenu(event) {
+        event.preventDefault();
+        const { x, y } = getCanvasCoordinates(event);
+        const pane = findPaneAtCoordinates(x, y);
 
-        for (let i = appState.panes.length - 1; i >= 0; i--) {
-          const p = appState.panes[i];
-          if (p.contains(x, y)) {
-            if (p.slider) document.body.removeChild(p.slider);
-            let t = audioCtx.currentTime;
-            p.gain.gain.cancelScheduledValues(t);
-            p.gain.gain.setValueAtTime(p.gain.gain.value, t);
-            p.gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.05);
-            setTimeout(() => {
-              p.osc.stop();
-              p.osc.disconnect();
-              p.gain.disconnect();
-            }, OSCILLATOR_STOP_DELAY);
-            appState.panes.splice(i, 1);
-            break;
-          }
+        if (pane) {
+          if (pane.slider) document.body.removeChild(pane.slider);
+          const currentTime = audioCtx.currentTime;
+          pane.gain.gain.cancelScheduledValues(currentTime);
+          pane.gain.gain.setValueAtTime(pane.gain.gain.value, currentTime);
+          pane.gain.gain.exponentialRampToValueAtTime(
+            0.0001,
+            currentTime + 0.05
+          );
+          setTimeout(() => {
+            pane.osc.stop();
+            pane.osc.disconnect();
+            pane.gain.disconnect();
+          }, OSCILLATOR_STOP_DELAY);
+          appState.panes.splice(appState.panes.indexOf(pane), 1);
         }
       }
 
@@ -427,7 +440,7 @@
       canvas.addEventListener("mousedown", handleMouseDown);
       canvas.addEventListener("mousemove", handleMouseMove);
       canvas.addEventListener("mouseup", handleMouseUp);
-      canvas.addEventListener("mouseleave", handleMouseLeave);
+      canvas.addEventListener("mouseleave", handleMouseUp); // Reuse mouseup logic
       canvas.addEventListener("dblclick", handleDoubleClick);
       canvas.addEventListener("contextmenu", handleContextMenu);
       canvas.addEventListener("touchstart", handleTouchStart, {
@@ -443,29 +456,33 @@
         ctx.fillStyle = "black";
         ctx.fillRect(0, 0, canvas.width, canvas.height);
         ctx.globalCompositeOperation = "lighter";
-        const t = audioCtx.currentTime;
-        let indiv = {};
-        appState.panes.forEach((p) => (indiv[p.id] = 0));
-        let compRegions = {};
-        for (let i = 0; i < GRID_COLUMNS; i++) {
-          for (let j = 0; j < GRID_ROWS; j++) {
-            const sampleX = (i + 0.5) * cellWidth,
-              sampleY = (j + 0.5) * cellHeight;
-            const covering = appState.panes.filter(
-              (p) =>
-                sampleX >= p.x &&
-                sampleX <= p.x + p.width &&
-                sampleY >= p.y &&
-                sampleY <= p.y + p.height
+        const currentTime = audioCtx.currentTime;
+        const individualAreas = {};
+        appState.panes.forEach((pane) => (individualAreas[pane.id] = 0));
+        const compositeRegions = {};
+
+        // Calculate pane coverage and composite regions
+        for (let col = 0; col < GRID_COLUMNS; col++) {
+          for (let row = 0; row < GRID_ROWS; row++) {
+            const sampleX = (col + 0.5) * cellWidth;
+            const sampleY = (row + 0.5) * cellHeight;
+            const coveringPanes = appState.panes.filter(
+              (pane) =>
+                sampleX >= pane.x &&
+                sampleX <= pane.x + pane.width &&
+                sampleY >= pane.y &&
+                sampleY <= pane.y + pane.height
             );
-            if (covering.length === 1) indiv[covering[0].id] += cellArea;
-            else if (covering.length >= 2) {
-              let key = covering
-                .map((p) => p.id)
-                .sort((a, b) => a - b)
+
+            if (coveringPanes.length === 1) {
+              individualAreas[coveringPanes[0].id] += cellArea;
+            } else if (coveringPanes.length >= 2) {
+              const compositeKey = coveringPanes
+                .map((pane) => pane.id)
+                .sort()
                 .join(",");
-              if (!compRegions[key])
-                compRegions[key] = {
+              if (!compositeRegions[compositeKey]) {
+                compositeRegions[compositeKey] = {
                   area: 0,
                   sumX: 0,
                   sumY: 0,
@@ -473,72 +490,90 @@
                   sumG: 0,
                   sumB: 0,
                 };
+              }
               let r = 0,
                 g = 0,
                 b = 0;
-              covering.forEach((p) => {
-                r = screenChannel(r, p.rgb.r / 255);
-                g = screenChannel(g, p.rgb.g / 255);
-                b = screenChannel(b, p.rgb.b / 255);
+              coveringPanes.forEach((pane) => {
+                r = screenChannel(r, pane.rgb.r / 255);
+                g = screenChannel(g, pane.rgb.g / 255);
+                b = screenChannel(b, pane.rgb.b / 255);
               });
-              compRegions[key].area += cellArea;
-              compRegions[key].sumX += sampleX * cellArea;
-              compRegions[key].sumY += sampleY * cellArea;
-              compRegions[key].sumR += r * 255 * cellArea;
-              compRegions[key].sumG += g * 255 * cellArea;
-              compRegions[key].sumB += b * 255 * cellArea;
+              compositeRegions[compositeKey].area += cellArea;
+              compositeRegions[compositeKey].sumX += sampleX * cellArea;
+              compositeRegions[compositeKey].sumY += sampleY * cellArea;
+              compositeRegions[compositeKey].sumR += r * 255 * cellArea;
+              compositeRegions[compositeKey].sumG += g * 255 * cellArea;
+              compositeRegions[compositeKey].sumB += b * 255 * cellArea;
             }
           }
         }
-        appState.panes.forEach((p) => {
-          let vol = Math.min(0.05 * (indiv[p.id] / REF_AREA), 0.2);
-          p.gain.gain.setTargetAtTime(vol, t, 0.05);
-          p.osc.frequency.setTargetAtTime(p.baseFrequency, t, 0.05);
-          p.draw(ctx, indiv[p.id]);
+
+        // Update individual pane volumes and frequencies
+        appState.panes.forEach((pane) => {
+          const volume = Math.min(
+            0.05 * (individualAreas[pane.id] / REF_AREA),
+            0.2
+          );
+          pane.gain.gain.setTargetAtTime(volume, currentTime, 0.05);
+          pane.osc.frequency.setTargetAtTime(
+            pane.baseFrequency,
+            currentTime,
+            0.05
+          );
+          pane.draw(ctx);
         });
-        for (let key in compRegions) {
-          const region = compRegions[key],
-            area = region.area;
-          const avgR = region.sumR / area,
-            avgG = region.sumG / area,
-            avgB = region.sumB / area;
+
+        // Update composite oscillators
+        for (const key in compositeRegions) {
+          const region = compositeRegions[key];
+          const area = region.area;
+          const avgR = region.sumR / area;
+          const avgG = region.sumG / area;
+          const avgB = region.sumB / area;
           const [L] = rgbToLab(avgR, avgG, avgB);
-          const compFreq = getFrequencyFromLabL(L);
-          const compVol = Math.min(0.05 * (area / REF_AREA), 0.2);
+          const compositeFrequency = getFrequencyFromLabL(L);
+          const compositeVolume = Math.min(0.05 * (area / REF_AREA), 0.2);
+
           if (!appState.compositeOscillators[key]) {
-            const osc = audioCtx.createOscillator(),
-              gain = audioCtx.createGain();
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
             osc.type = "sine";
-            osc.frequency.value = compFreq;
+            osc.frequency.value = compositeFrequency;
             gain.gain.value = 0.0001;
             osc.connect(gain);
             gain.connect(audioCtx.destination);
             osc.start();
-            gain.gain.cancelScheduledValues(t);
-            gain.gain.setValueAtTime(0.0001, t);
-            gain.gain.exponentialRampToValueAtTime(compVol, t + 0.05);
+            gain.gain.setValueAtTime(0.0001, currentTime);
+            gain.gain.exponentialRampToValueAtTime(
+              compositeVolume,
+              currentTime + 0.05
+            );
             appState.compositeOscillators[key] = { osc, gain };
           } else {
-            let c = appState.compositeOscillators[key];
-            c.osc.frequency.setTargetAtTime(compFreq, t, 0.05);
-            c.gain.gain.setTargetAtTime(compVol, t, 0.05);
+            const oscillator = appState.compositeOscillators[key];
+            oscillator.osc.frequency.setTargetAtTime(
+              compositeFrequency,
+              currentTime,
+              0.05
+            );
+            oscillator.gain.gain.setTargetAtTime(
+              compositeVolume,
+              currentTime,
+              0.05
+            );
           }
-          const centroidX = region.sumX / area,
-            centroidY = region.sumY / area;
-          ctx.fillStyle = "white";
-          ctx.font = "16px sans-serif";
-          ctx.fillText(compFreq.toFixed(2) + " Hz", centroidX - 30, centroidY);
         }
-        for (let key in appState.compositeOscillators) {
-          if (!(key in compRegions)) {
-            let c = appState.compositeOscillators[key];
-            c.gain.gain.cancelScheduledValues(t);
-            c.gain.gain.setValueAtTime(Math.max(0.0001, c.gain.gain.value), t);
-            c.gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.05);
+
+        // Remove unused composite oscillators
+        for (const key in appState.compositeOscillators) {
+          if (!(key in compositeRegions)) {
+            const oscillator = appState.compositeOscillators[key];
+            oscillator.gain.gain.setTargetAtTime(0.0001, currentTime, 0.05);
             setTimeout(() => {
-              c.osc.stop();
-              c.osc.disconnect();
-              c.gain.disconnect();
+              oscillator.osc.stop();
+              oscillator.osc.disconnect();
+              oscillator.gain.disconnect();
               delete appState.compositeOscillators[key];
             }, OSCILLATOR_STOP_DELAY);
           }

@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
   <head>
-    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Overlapping Panes</title>
     <style>
       html,
@@ -42,8 +42,8 @@
         }
         .hue-slider::-webkit-slider-thumb,
         .hue-slider::-moz-range-thumb {
-          width: 32px; 
-          height: 32px; 
+          width: 32px;
+          height: 32px;
         }
       }
     </style>
@@ -51,10 +51,7 @@
   <body>
     <canvas id="canvas"></canvas>
     <script>
-      // ---- Mapping & Global Constants ----
-      const mappingPresets = [{ H_low: 240, H_high: 600 }];
-      const randomMapping = () =>
-        mappingPresets[Math.floor(Math.random() * mappingPresets.length)];
+      // ---- Global Constants ----
       const sliderRange = 800;
 
       // ---- Canvas & Audio Setup ----
@@ -77,20 +74,28 @@
 
       // ---- Pane Class ----
       class Pane {
-        constructor(x, y, width, height, mapping, sliderValue) {
+        constructor(x, y, width, height, sliderValue) {
           this.id = Pane.idCounter++;
           this.x = x;
           this.y = y;
           this.width = width;
           this.height = height;
-          this.mapping = mapping;
-          const ratio = sliderValue / sliderRange,
-            hue = mapping.H_low + ratio * (mapping.H_high - mapping.H_low);
+          this.slider = null;
+          this.updateColorAndFrequency(sliderValue);
+          this.setupAudio();
+        }
+
+        updateColorAndFrequency(sliderValue) {
+          const ratio = sliderValue / sliderRange;
+          const hue = 240 + ratio * 360; // Always blue to blue
           this.hsl = { h: hue % 360, s: 100, l: 50 };
           const [r, g, b] = hslToRgb(this.hsl.h, this.hsl.s, this.hsl.l);
           this.rgb = { r, g, b };
           const [L] = rgbToLab(r, g, b);
           this.baseFrequency = getFrequencyFromLabL(L);
+        }
+
+        setupAudio() {
           this.osc = audioCtx.createOscillator();
           this.gain = audioCtx.createGain();
           this.osc.type = "sine";
@@ -99,8 +104,8 @@
           this.osc.connect(this.gain);
           this.gain.connect(audioCtx.destination);
           this.osc.start();
-          this.slider = null;
         }
+
         draw(ctx, vol = 1) {
           ctx.fillStyle = `rgb(${this.rgb.r},${this.rgb.g},${this.rgb.b})`;
           ctx.globalAlpha = 0.8;
@@ -109,16 +114,19 @@
           ctx.fillStyle = "white";
           ctx.font = "16px sans-serif";
           ctx.fillText(
-            this.osc.frequency.value.toFixed(2) + " Hz",
+            `${this.osc.frequency.value.toFixed(2)} Hz`,
             this.x + 5,
             this.y + 20
           );
           if (this.slider) {
-            this.slider.style.left = this.x + "px";
-            this.slider.style.top = this.y + this.height + 5 + "px";
-            this.slider.style.width = this.width + "px";
+            Object.assign(this.slider.style, {
+              left: `${this.x}px`,
+              top: `${this.y + this.height + 5}px`,
+              width: `${this.width}px`,
+            });
           }
         }
+
         contains(x, y) {
           return (
             x >= this.x &&
@@ -127,64 +135,73 @@
             y <= this.y + this.height
           );
         }
+
         toggleSlider() {
           if (this.slider) {
             document.body.removeChild(this.slider);
             this.slider = null;
           } else {
-            const slider = document.createElement("input");
-            slider.type = "range";
-            slider.min = 0;
-            slider.max = sliderRange;
-            slider.step = 0.1;
-            let currentHue = this.hsl.h;
-            if (currentHue < this.mapping.H_low) currentHue += 360;
-            slider.value =
-              ((currentHue - this.mapping.H_low) /
-                (this.mapping.H_high - this.mapping.H_low)) *
-              sliderRange;
-            slider.className = "hue-slider";
-            slider.style.left = this.x + "px";
-            slider.style.top = this.y + this.height + 5 + "px";
-            slider.style.width = this.width + "px";
-            slider.addEventListener("input", () => {
-              const newHue =
-                (this.mapping.H_low +
-                  (slider.value / sliderRange) *
-                    (this.mapping.H_high - this.mapping.H_low)) %
-                360;
-              this.hsl.h = newHue;
-              const [r, g, b] = hslToRgb(newHue, this.hsl.s, this.hsl.l);
-              this.rgb = { r, g, b };
-              const [L] = rgbToLab(r, g, b);
-              this.baseFrequency = getFrequencyFromLabL(L);
-            });
-            ["mouseup", "touchend"].forEach((evt) => {
-              slider.addEventListener(evt, () =>
-                setTimeout(() => {
-                  if (slider.parentNode) slider.parentNode.removeChild(slider);
-                  this.slider = null;
-                }, 500)
-              );
-            });
-            document.body.appendChild(slider);
-            this.slider = slider;
+            this.createSlider();
           }
+        }
+
+        createSlider() {
+          const slider = document.createElement("input");
+          slider.type = "range";
+          slider.min = 0;
+          slider.max = sliderRange;
+          slider.step = 0.1;
+          slider.value = this.calculateSliderValue();
+          slider.className = "hue-slider";
+          Object.assign(slider.style, {
+            left: `${this.x}px`,
+            top: `${this.y + this.height + 5}px`,
+            width: `${this.width}px`,
+          });
+          slider.addEventListener("input", () => this.updateSlider(slider));
+          this.addSliderRemovalEvents(slider);
+          document.body.appendChild(slider);
+          this.slider = slider;
+        }
+
+        calculateSliderValue() {
+          let currentHue = this.hsl.h;
+          if (currentHue < 240) currentHue += 360;
+          return ((currentHue - 240) / 360) * sliderRange;
+        }
+
+        updateSlider(slider) {
+          const newHue = (240 + (slider.value / sliderRange) * 360) % 360;
+          this.hsl.h = newHue;
+          const [r, g, b] = hslToRgb(newHue, this.hsl.s, this.hsl.l);
+          this.rgb = { r, g, b };
+          const [L] = rgbToLab(r, g, b);
+          this.baseFrequency = getFrequencyFromLabL(L);
+        }
+
+        addSliderRemovalEvents(slider) {
+          ["mouseup", "touchend"].forEach((evt) =>
+            slider.addEventListener(evt, () =>
+              setTimeout(() => {
+                if (slider.parentNode) slider.parentNode.removeChild(slider);
+                this.slider = null;
+              }, 500)
+            )
+          );
         }
       }
       Pane.idCounter = 0;
 
-      // ---- Global Variables & Frequency Input ----
+      // ---- Global Variables & Event Handlers ----
       let panes = [],
         selectedPane = null,
         isDragging = false,
+        resizing = false,
         dragOffsetX = 0,
         dragOffsetY = 0,
-        resizing = false,
         resizeOffsetX = 0,
         resizeOffsetY = 0;
       const resizeMargin = 30;
-      let editingPane = null;
 
       canvas.addEventListener("mousedown", (e) => {
         if (audioCtx.state === "suspended") audioCtx.resume();
@@ -257,14 +274,7 @@
             xPos = Math.min(x - width / 2, canvas.width - width),
             yPos = Math.min(y - height / 2, canvas.height - height);
           panes.push(
-            new Pane(
-              xPos,
-              yPos,
-              width,
-              height,
-              randomMapping(),
-              Math.random() * sliderRange
-            )
+            new Pane(xPos, yPos, width, height, Math.random() * sliderRange)
           );
         }
       });
@@ -358,14 +368,7 @@
                 xPos = Math.min(x - width / 2, canvas.width - width),
                 yPos = Math.min(y - height / 2, canvas.height - height);
               panes.push(
-                new Pane(
-                  xPos,
-                  yPos,
-                  width,
-                  height,
-                  randomMapping(),
-                  Math.random() * sliderRange
-                )
+                new Pane(xPos, yPos, width, height, Math.random() * sliderRange)
               );
             } else {
               tapTimeout = setTimeout(() => {}, 300);

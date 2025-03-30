@@ -352,12 +352,17 @@
             panes.push(p);
           } else {
             if (Date.now() - lastTap < 300) {
+              const rand = (min, max) => min + Math.random() * (max - min);
+              let width = rand(90, 250),
+                height = rand(90, 250),
+                xPos = Math.min(x - width / 2, canvas.width - width),
+                yPos = Math.min(y - height / 2, canvas.height - height);
               panes.push(
                 new Pane(
-                  x - 100,
-                  y - 100,
-                  200,
-                  200,
+                  xPos,
+                  yPos,
+                  width,
+                  height,
                   randomMapping(),
                   Math.random() * sliderRange
                 )

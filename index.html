@@ -53,6 +53,23 @@
     <script>
       // ---- Global Constants ----
       const sliderRange = 800;
+      const resizeMargin = 30;
+      let panes = [],
+        selectedPane = null,
+        isDragging = false,
+        resizing = false,
+        dragOffsetX = 0,
+        dragOffsetY = 0,
+        resizeOffsetX = 0,
+        resizeOffsetY = 0;
+
+      // Minimal touch support (similar to mouse)
+      let lastTap = 0,
+        tapTimeout,
+        longPressTimeout;
+
+      // ---- Composite Sound & Animation ----
+      let compositeOscillators = {};
 
       // ---- Canvas & Audio Setup ----
       const canvas = document.getElementById("canvas"),
@@ -81,13 +98,13 @@
           this.width = width;
           this.height = height;
           this.slider = null;
-          this.updateColorAndFrequency(sliderValue);
+          this.setColorAndFrequency(sliderValue);
           this.setupAudio();
         }
 
-        updateColorAndFrequency(sliderValue) {
+        setColorAndFrequency(sliderValue) {
           const ratio = sliderValue / sliderRange;
-          const hue = ratio * 360; // Hue now ranges from 0 to 360
+          const hue = ratio * 360;
           this.hsl = { h: hue % 360, s: 100, l: 50 };
           const [r, g, b] = hslToRgb(this.hsl.h, this.hsl.s, this.hsl.l);
           this.rgb = { r, g, b };
@@ -106,7 +123,7 @@
           this.osc.start();
         }
 
-        draw(ctx, vol = 1) {
+        draw(ctx) {
           ctx.fillStyle = `rgb(${this.rgb.r},${this.rgb.g},${this.rgb.b})`;
           ctx.globalAlpha = 0.8;
           ctx.fillRect(this.x, this.y, this.width, this.height);
@@ -141,65 +158,38 @@
             document.body.removeChild(this.slider);
             this.slider = null;
           } else {
-            this.createSlider();
-          }
-        }
-
-        createSlider() {
-          const slider = document.createElement("input");
-          slider.type = "range";
-          slider.min = 0;
-          slider.max = sliderRange;
-          slider.step = 0.1;
-          slider.value = this.calculateSliderValue();
-          slider.className = "hue-slider";
-          Object.assign(slider.style, {
-            left: `${this.x}px`,
-            top: `${this.y + this.height + 5}px`,
-            width: `${this.width}px`,
-          });
-          slider.addEventListener("input", () => this.updateSlider(slider));
-          this.addSliderRemovalEvents(slider);
-          document.body.appendChild(slider);
-          this.slider = slider;
-        }
-
-        calculateSliderValue() {
-          return (this.hsl.h / 360) * sliderRange; // No offset applied
-        }
-
-        updateSlider(slider) {
-          const newHue = (slider.value / sliderRange) * 360; // No offset applied
-          this.hsl.h = newHue;
-          const [r, g, b] = hslToRgb(newHue, this.hsl.s, this.hsl.l);
-          this.rgb = { r, g, b };
-          const [L] = rgbToLab(r, g, b);
-          this.baseFrequency = getFrequencyFromLabL(L);
-        }
-
-        addSliderRemovalEvents(slider) {
-          ["mouseup", "touchend"].forEach((evt) =>
-            slider.addEventListener(evt, () =>
+            const slider = document.createElement("input");
+            slider.type = "range";
+            slider.min = 0;
+            slider.max = sliderRange;
+            slider.step = 0.1;
+            slider.value = (this.hsl.h / 360) * sliderRange;
+            slider.className = "hue-slider";
+            Object.assign(slider.style, {
+              left: `${this.x}px`,
+              top: `${this.y + this.height + 5}px`,
+              width: `${this.width}px`,
+            });
+            slider.addEventListener("input", () => {
+              const newHue = (slider.value / sliderRange) * 360;
+              this.hsl.h = newHue;
+              const [r, g, b] = hslToRgb(newHue, this.hsl.s, this.hsl.l);
+              this.rgb = { r, g, b };
+              const [L] = rgbToLab(r, g, b);
+              this.baseFrequency = getFrequencyFromLabL(L);
+            });
+            slider.addEventListener("mouseup", () => {
               setTimeout(() => {
                 if (slider.parentNode) slider.parentNode.removeChild(slider);
                 this.slider = null;
-              }, 500)
-            )
-          );
+              }, 500);
+            });
+            document.body.appendChild(slider);
+            this.slider = slider;
+          }
         }
       }
       Pane.idCounter = 0;
-
-      // ---- Global Variables & Event Handlers ----
-      let panes = [],
-        selectedPane = null,
-        isDragging = false,
-        resizing = false,
-        dragOffsetX = 0,
-        dragOffsetY = 0,
-        resizeOffsetX = 0,
-        resizeOffsetY = 0;
-      const resizeMargin = 30;
 
       canvas.addEventListener("mousedown", (e) => {
         if (audioCtx.state === "suspended") audioCtx.resume();
@@ -230,7 +220,6 @@
           }
         }
       });
-
       canvas.addEventListener("mousemove", (e) => {
         if (!selectedPane) return;
         const rect = canvas.getBoundingClientRect(),
@@ -247,7 +236,6 @@
           selectedPane.y = y - dragOffsetY;
         }
       });
-
       canvas.addEventListener("mouseup", () => {
         selectedPane = null;
         isDragging = false;
@@ -258,7 +246,6 @@
         isDragging = false;
         resizing = false;
       });
-
       canvas.addEventListener("dblclick", (e) => {
         const rect = canvas.getBoundingClientRect(),
           x = e.clientX - rect.left,
@@ -276,7 +263,6 @@
           );
         }
       });
-
       canvas.addEventListener("contextmenu", (e) => {
         e.preventDefault();
         const rect = canvas.getBoundingClientRect(),
@@ -300,11 +286,6 @@
           }
         }
       });
-
-      // Minimal touch support (similar to mouse)
-      let lastTap = 0,
-        tapTimeout,
-        longPressTimeout;
       canvas.addEventListener(
         "touchstart",
         (e) => {
@@ -376,7 +357,6 @@
         },
         { passive: false }
       );
-
       canvas.addEventListener(
         "touchmove",
         (e) => {
@@ -404,7 +384,6 @@
         },
         { passive: false }
       );
-
       canvas.addEventListener(
         "touchend",
         (e) => {
@@ -417,8 +396,6 @@
         { passive: false }
       );
 
-      // ---- Composite Sound & Animation ----
-      let compositeOscillators = {};
       function animate() {
         requestAnimationFrame(animate);
         ctx.clearRect(0, 0, canvas.width, canvas.height);

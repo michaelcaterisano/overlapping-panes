@@ -51,36 +51,56 @@
   <body>
     <canvas id="canvas"></canvas>
     <script>
-      // ---- Global Variables ----
+      // ---- Global Constants ----
       const AudioContext = window.AudioContext || window.webkitAudioContext;
       const audioCtx = new AudioContext();
       const canvas = document.getElementById("canvas");
       const ctx = canvas.getContext("2d");
-      const resizeMargin = 30;
-      const sliderRange = 800;
+
+      const RESIZE_MARGIN = 30;
+      const SLIDER_RANGE = 800;
+      const MIN_PANE_SIZE = 50;
+      const MAX_PANE_WIDTH = 300;
+      const MAX_PANE_HEIGHT = 300;
+      const MIN_PANE_WIDTH = 100;
+      const MIN_PANE_HEIGHT = 100;
+      const GRID_COLUMNS = 50;
+      const GRID_ROWS = 50;
+      const REF_AREA = 30000;
+      const LONG_PRESS_DURATION = 800;
+      const DOUBLE_CLICK_THRESHOLD = 300;
+      const TOUCH_RESIZE_MARGIN_MULTIPLIER = 2;
+      const SLIDER_REMOVAL_DELAY = 500;
+      const OSCILLATOR_STOP_DELAY = 60;
+      const PERFECT_FIFTH_RATIO = 1.5;
+      const PERFECT_FIFTH_TOLERANCE = 0.01;
 
       let cellArea;
       let cellHeight;
       let cellWidth;
-      let compositeOscillators = {};
-      let dragOffsetX = 0;
-      let dragOffsetY = 0;
-      let isDragging = false;
-      let lastTap = 0;
-      let longPressTimeout;
-      let panes = [];
-      let resizeOffsetX = 0;
-      let resizeOffsetY = 0;
-      let resizing = false;
-      let selectedPane = null;
-      let tapTimeout;
+
+      // ---- Application State ----
+      const appState = {
+        selectedPane: null,
+        isDragging: false,
+        resizing: false,
+        dragOffsetX: 0,
+        dragOffsetY: 0,
+        resizeOffsetX: 0,
+        resizeOffsetY: 0,
+        lastTap: 0,
+        tapTimeout: null,
+        longPressTimeout: null,
+        panes: [],
+        compositeOscillators: {},
+      };
 
       // Resize handler to update canvas dimensions and dependent variables
       function handleResize() {
         canvas.width = window.innerWidth;
         canvas.height = window.innerHeight;
-        cellWidth = canvas.width / 50;
-        cellHeight = canvas.height / 50;
+        cellWidth = canvas.width / GRID_COLUMNS;
+        cellHeight = canvas.height / GRID_ROWS;
         cellArea = cellWidth * cellHeight;
       }
 
@@ -102,7 +122,7 @@
         }
 
         setColorAndFrequency(sliderValue) {
-          const ratio = sliderValue / sliderRange;
+          const ratio = sliderValue / SLIDER_RANGE;
           const hue = ratio * 360;
           this.hsl = { h: hue % 360, s: 100, l: 50 };
           const [r, g, b] = hslToRgb(this.hsl.h, this.hsl.s, this.hsl.l);
@@ -160,9 +180,9 @@
             const slider = document.createElement("input");
             slider.type = "range";
             slider.min = 0;
-            slider.max = sliderRange;
+            slider.max = SLIDER_RANGE;
             slider.step = 0.1;
-            slider.value = (this.hsl.h / 360) * sliderRange;
+            slider.value = (this.hsl.h / 360) * SLIDER_RANGE;
             slider.className = "hue-slider";
             Object.assign(slider.style, {
               left: `${this.x}px`,
@@ -170,7 +190,7 @@
               width: `${this.width}px`,
             });
             slider.addEventListener("input", () => {
-              const newHue = (slider.value / sliderRange) * 360;
+              const newHue = (slider.value / SLIDER_RANGE) * 360;
               this.hsl.h = newHue;
               const [r, g, b] = hslToRgb(newHue, this.hsl.s, this.hsl.l);
               this.rgb = { r, g, b };
@@ -181,7 +201,7 @@
               setTimeout(() => {
                 if (slider.parentNode) slider.parentNode.removeChild(slider);
                 this.slider = null;
-              }, 500);
+              }, SLIDER_REMOVAL_DELAY);
             });
             document.body.appendChild(slider);
             this.slider = slider;
@@ -197,52 +217,61 @@
         const x = e.clientX - rect.left;
         const y = e.clientY - rect.top;
 
-        for (let i = panes.length - 1; i >= 0; i--) {
-          const p = panes[i];
+        for (let i = appState.panes.length - 1; i >= 0; i--) {
+          const p = appState.panes[i];
           if (p.contains(x, y)) {
-            if (x >= p.x + p.width - resizeMargin && y >= p.y + p.height - resizeMargin) {
-              selectedPane = p;
-              resizing = true;
-              resizeOffsetX = p.x + p.width - x;
-              resizeOffsetY = p.y + p.height - y;
+            if (
+              x >= p.x + p.width - RESIZE_MARGIN &&
+              y >= p.y + p.height - RESIZE_MARGIN
+            ) {
+              appState.selectedPane = p;
+              appState.resizing = true;
+              appState.resizeOffsetX = p.x + p.width - x;
+              appState.resizeOffsetY = p.y + p.height - y;
             } else {
-              selectedPane = p;
-              isDragging = true;
-              dragOffsetX = x - p.x;
-              dragOffsetY = y - p.y;
+              appState.selectedPane = p;
+              appState.isDragging = true;
+              appState.dragOffsetX = x - p.x;
+              appState.dragOffsetY = y - p.y;
             }
-            panes.splice(i, 1);
-            panes.push(p);
+            appState.panes.splice(i, 1);
+            appState.panes.push(p);
             break;
           }
         }
       }
 
       function handleMouseMove(e) {
-        if (!selectedPane) return;
+        if (!appState.selectedPane) return;
         const rect = canvas.getBoundingClientRect();
         const x = e.clientX - rect.left;
         const y = e.clientY - rect.top;
 
-        if (resizing) {
-          selectedPane.width = Math.max(50, x - selectedPane.x + resizeOffsetX);
-          selectedPane.height = Math.max(50, y - selectedPane.y + resizeOffsetY);
-        } else if (isDragging) {
-          selectedPane.x = x - dragOffsetX;
-          selectedPane.y = y - dragOffsetY;
+        if (appState.resizing) {
+          appState.selectedPane.width = Math.max(
+            MIN_PANE_SIZE,
+            x - appState.selectedPane.x + appState.resizeOffsetX
+          );
+          appState.selectedPane.height = Math.max(
+            MIN_PANE_SIZE,
+            y - appState.selectedPane.y + appState.resizeOffsetY
+          );
+        } else if (appState.isDragging) {
+          appState.selectedPane.x = x - appState.dragOffsetX;
+          appState.selectedPane.y = y - appState.dragOffsetY;
         }
       }
 
       function handleMouseUp() {
-        selectedPane = null;
-        isDragging = false;
-        resizing = false;
+        appState.selectedPane = null;
+        appState.isDragging = false;
+        appState.resizing = false;
       }
 
       function handleMouseLeave() {
-        selectedPane = null;
-        isDragging = false;
-        resizing = false;
+        appState.selectedPane = null;
+        appState.isDragging = false;
+        appState.resizing = false;
       }
 
       function handleDoubleClick(e) {
@@ -250,16 +279,18 @@
         const x = e.clientX - rect.left;
         const y = e.clientY - rect.top;
 
-        let p = panes.find((p) => p.contains(x, y));
+        let p = appState.panes.find((p) => p.contains(x, y));
         if (p) {
           p.toggleSlider();
         } else {
           const rand = (min, max) => min + Math.random() * (max - min);
-          let width = rand(100, 300);
-          let height = rand(100, 300);
+          let width = rand(MIN_PANE_WIDTH, MAX_PANE_WIDTH);
+          let height = rand(MIN_PANE_HEIGHT, MAX_PANE_HEIGHT);
           let xPos = Math.min(x - width / 2, canvas.width - width);
           let yPos = Math.min(y - height / 2, canvas.height - height);
-          panes.push(new Pane(xPos, yPos, width, height, Math.random() * sliderRange));
+          appState.panes.push(
+            new Pane(xPos, yPos, width, height, Math.random() * SLIDER_RANGE)
+          );
         }
       }
 
@@ -269,8 +300,8 @@
         const x = e.clientX - rect.left;
         const y = e.clientY - rect.top;
 
-        for (let i = panes.length - 1; i >= 0; i--) {
-          const p = panes[i];
+        for (let i = appState.panes.length - 1; i >= 0; i--) {
+          const p = appState.panes[i];
           if (p.contains(x, y)) {
             if (p.slider) document.body.removeChild(p.slider);
             let t = audioCtx.currentTime;
@@ -281,8 +312,8 @@
               p.osc.stop();
               p.osc.disconnect();
               p.gain.disconnect();
-            }, 60);
-            panes.splice(i, 1);
+            }, OSCILLATOR_STOP_DELAY);
+            appState.panes.splice(i, 1);
             break;
           }
         }
@@ -296,82 +327,100 @@
         const x = touch.clientX - rect.left;
         const y = touch.clientY - rect.top;
 
-        longPressTimeout = setTimeout(() => {
-          let p = panes.find((p) => p.contains(x, y));
+        appState.longPressTimeout = setTimeout(() => {
+          let p = appState.panes.find((p) => p.contains(x, y));
           if (p) {
             if (p.slider) document.body.removeChild(p.slider);
             p.gain.gain.setValueAtTime(p.gain.gain.value, audioCtx.currentTime);
-            p.gain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 0.03);
+            p.gain.gain.exponentialRampToValueAtTime(
+              0.0001,
+              audioCtx.currentTime + 0.03
+            );
             setTimeout(() => {
               p.osc.stop();
               p.osc.disconnect();
               p.gain.disconnect();
             }, 500);
-            panes.splice(panes.indexOf(p), 1);
+            appState.panes.splice(appState.panes.indexOf(p), 1);
           }
-        }, 800);
+        }, LONG_PRESS_DURATION);
 
-        let p = panes.find((p) => p.contains(x, y));
+        let p = appState.panes.find((p) => p.contains(x, y));
         if (p) {
-          if (Date.now() - lastTap < 300) {
-            clearTimeout(tapTimeout);
-            clearTimeout(longPressTimeout);
+          if (Date.now() - appState.lastTap < DOUBLE_CLICK_THRESHOLD) {
+            clearTimeout(appState.tapTimeout);
+            clearTimeout(appState.longPressTimeout);
             p.toggleSlider();
           } else {
-            if (x >= p.x + p.width - resizeMargin * 2 && y >= p.y + p.height - resizeMargin * 2) {
-              selectedPane = p;
-              resizing = true;
-              resizeOffsetX = p.x + p.width - x;
-              resizeOffsetY = p.y + p.height - y;
+            if (
+              x >=
+                p.x +
+                  p.width -
+                  RESIZE_MARGIN * TOUCH_RESIZE_MARGIN_MULTIPLIER &&
+              y >=
+                p.y + p.height - RESIZE_MARGIN * TOUCH_RESIZE_MARGIN_MULTIPLIER
+            ) {
+              appState.selectedPane = p;
+              appState.resizing = true;
+              appState.resizeOffsetX = p.x + p.width - x;
+              appState.resizeOffsetY = p.y + p.height - y;
             } else {
-              selectedPane = p;
-              isDragging = true;
-              dragOffsetX = x - p.x;
-              dragOffsetY = y - p.y;
+              appState.selectedPane = p;
+              appState.isDragging = true;
+              appState.dragOffsetX = x - p.x;
+              appState.dragOffsetY = y - p.y;
             }
           }
-          panes.splice(panes.indexOf(p), 1);
-          panes.push(p);
+          appState.panes.splice(appState.panes.indexOf(p), 1);
+          appState.panes.push(p);
         } else {
-          if (Date.now() - lastTap < 300) {
+          if (Date.now() - appState.lastTap < DOUBLE_CLICK_THRESHOLD) {
             const rand = (min, max) => min + Math.random() * (max - min);
             let width = rand(90, 250);
             let height = rand(90, 250);
             let xPos = Math.min(x - width / 2, canvas.width - width);
             let yPos = Math.min(y - height / 2, canvas.height - height);
-            panes.push(new Pane(xPos, yPos, width, height, Math.random() * sliderRange));
+            appState.panes.push(
+              new Pane(xPos, yPos, width, height, Math.random() * SLIDER_RANGE)
+            );
           } else {
-            tapTimeout = setTimeout(() => {}, 300);
+            appState.tapTimeout = setTimeout(() => {}, DOUBLE_CLICK_THRESHOLD);
           }
         }
-        lastTap = Date.now();
+        appState.lastTap = Date.now();
       }
 
       function handleTouchMove(e) {
         e.preventDefault();
-        clearTimeout(longPressTimeout);
+        clearTimeout(appState.longPressTimeout);
         const touch = e.touches[0];
         const rect = canvas.getBoundingClientRect();
         const x = touch.clientX - rect.left;
         const y = touch.clientY - rect.top;
 
-        if (selectedPane) {
-          if (resizing) {
-            selectedPane.width = Math.max(50, x - selectedPane.x + resizeOffsetX);
-            selectedPane.height = Math.max(50, y - selectedPane.y + resizeOffsetY);
-          } else if (isDragging) {
-            selectedPane.x = x - dragOffsetX;
-            selectedPane.y = y - dragOffsetY;
+        if (appState.selectedPane) {
+          if (appState.resizing) {
+            appState.selectedPane.width = Math.max(
+              MIN_PANE_SIZE,
+              x - appState.selectedPane.x + appState.resizeOffsetX
+            );
+            appState.selectedPane.height = Math.max(
+              MIN_PANE_SIZE,
+              y - appState.selectedPane.y + appState.resizeOffsetY
+            );
+          } else if (appState.isDragging) {
+            appState.selectedPane.x = x - appState.dragOffsetX;
+            appState.selectedPane.y = y - appState.dragOffsetY;
           }
         }
       }
 
       function handleTouchEnd(e) {
         e.preventDefault();
-        clearTimeout(longPressTimeout);
-        selectedPane = null;
-        isDragging = false;
-        resizing = false;
+        clearTimeout(appState.longPressTimeout);
+        appState.selectedPane = null;
+        appState.isDragging = false;
+        appState.resizing = false;
       }
 
       // ---- Attach Event Listeners ----
@@ -381,7 +430,9 @@
       canvas.addEventListener("mouseleave", handleMouseLeave);
       canvas.addEventListener("dblclick", handleDoubleClick);
       canvas.addEventListener("contextmenu", handleContextMenu);
-      canvas.addEventListener("touchstart", handleTouchStart, { passive: false });
+      canvas.addEventListener("touchstart", handleTouchStart, {
+        passive: false,
+      });
       canvas.addEventListener("touchmove", handleTouchMove, { passive: false });
       canvas.addEventListener("touchend", handleTouchEnd, { passive: false });
 
@@ -394,13 +445,13 @@
         ctx.globalCompositeOperation = "lighter";
         const t = audioCtx.currentTime;
         let indiv = {};
-        panes.forEach((p) => (indiv[p.id] = 0));
+        appState.panes.forEach((p) => (indiv[p.id] = 0));
         let compRegions = {};
-        for (let i = 0; i < 50; i++) {
-          for (let j = 0; j < 50; j++) {
+        for (let i = 0; i < GRID_COLUMNS; i++) {
+          for (let j = 0; j < GRID_ROWS; j++) {
             const sampleX = (i + 0.5) * cellWidth,
               sampleY = (j + 0.5) * cellHeight;
-            const covering = panes.filter(
+            const covering = appState.panes.filter(
               (p) =>
                 sampleX >= p.x &&
                 sampleX <= p.x + p.width &&
@@ -439,9 +490,8 @@
             }
           }
         }
-        const refArea = 30000;
-        panes.forEach((p) => {
-          let vol = Math.min(0.05 * (indiv[p.id] / refArea), 0.2);
+        appState.panes.forEach((p) => {
+          let vol = Math.min(0.05 * (indiv[p.id] / REF_AREA), 0.2);
           p.gain.gain.setTargetAtTime(vol, t, 0.05);
           p.osc.frequency.setTargetAtTime(p.baseFrequency, t, 0.05);
           p.draw(ctx, indiv[p.id]);
@@ -454,8 +504,8 @@
             avgB = region.sumB / area;
           const [L] = rgbToLab(avgR, avgG, avgB);
           const compFreq = getFrequencyFromLabL(L);
-          const compVol = Math.min(0.05 * (area / refArea), 0.2);
-          if (!compositeOscillators[key]) {
+          const compVol = Math.min(0.05 * (area / REF_AREA), 0.2);
+          if (!appState.compositeOscillators[key]) {
             const osc = audioCtx.createOscillator(),
               gain = audioCtx.createGain();
             osc.type = "sine";
@@ -467,9 +517,9 @@
             gain.gain.cancelScheduledValues(t);
             gain.gain.setValueAtTime(0.0001, t);
             gain.gain.exponentialRampToValueAtTime(compVol, t + 0.05);
-            compositeOscillators[key] = { osc, gain };
+            appState.compositeOscillators[key] = { osc, gain };
           } else {
-            let c = compositeOscillators[key];
+            let c = appState.compositeOscillators[key];
             c.osc.frequency.setTargetAtTime(compFreq, t, 0.05);
             c.gain.gain.setTargetAtTime(compVol, t, 0.05);
           }
@@ -479,9 +529,9 @@
           ctx.font = "16px sans-serif";
           ctx.fillText(compFreq.toFixed(2) + " Hz", centroidX - 30, centroidY);
         }
-        for (let key in compositeOscillators) {
+        for (let key in appState.compositeOscillators) {
           if (!(key in compRegions)) {
-            let c = compositeOscillators[key];
+            let c = appState.compositeOscillators[key];
             c.gain.gain.cancelScheduledValues(t);
             c.gain.gain.setValueAtTime(Math.max(0.0001, c.gain.gain.value), t);
             c.gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.05);
@@ -489,31 +539,8 @@
               c.osc.stop();
               c.osc.disconnect();
               c.gain.disconnect();
-              delete compositeOscillators[key];
-            }, 60);
-          }
-        }
-
-        // Perfect Fifth Detection
-        const perfectFifth = 1.5,
-          tolerance = 0.01;
-        for (let i = 0; i < panes.length; i++) {
-          for (let j = i + 1; j < panes.length; j++) {
-            const f1 = panes[i].osc.frequency.value;
-            const f2 = panes[j].osc.frequency.value;
-            const ratio = Math.max(f1, f2) / Math.min(f1, f2);
-            if (Math.abs(ratio - perfectFifth) < tolerance) {
-              const x1 = panes[i].x + panes[i].width / 2;
-              const y1 = panes[i].y + panes[i].height / 2;
-              const x2 = panes[j].x + panes[j].width / 2;
-              const y2 = panes[j].y + panes[j].height / 2;
-              ctx.strokeStyle = "white";
-              ctx.lineWidth = 3;
-              ctx.beginPath();
-              ctx.moveTo(x1, y1);
-              ctx.lineTo(x2, y2);
-              ctx.stroke();
-            }
+              delete appState.compositeOscillators[key];
+            }, OSCILLATOR_STOP_DELAY);
           }
         }
       }

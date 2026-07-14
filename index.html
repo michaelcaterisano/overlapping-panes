@@ -72,8 +72,6 @@
       const TOUCH_RESIZE_MARGIN_MULTIPLIER = 2;
       const SLIDER_REMOVAL_DELAY = 500;
       const OSCILLATOR_STOP_DELAY = 60;
-      const PERFECT_FIFTH_RATIO = 1.5;
-      const PERFECT_FIFTH_TOLERANCE = 0.01;
 
       let cellArea;
       let cellHeight;
@@ -147,13 +145,6 @@
           ctx.globalAlpha = 0.8;
           ctx.fillRect(this.x, this.y, this.width, this.height);
           ctx.globalAlpha = 1;
-          ctx.fillStyle = "white";
-          ctx.font = "16px sans-serif";
-          ctx.fillText(
-            `${this.osc.frequency.value.toFixed(2)} Hz`,
-            this.x + 5,
-            this.y + 20
-          );
           if (this.slider) {
             Object.assign(this.slider.style, {
               left: `${this.x}px`,

@@ -631,5 +631,7 @@
     </script>
   <div id="howto" style="position:fixed;left:22px;top:20px;z-index:1000;cursor:pointer;font-family:system-ui,Helvetica,Arial,sans-serif;font-size:12.5px;line-height:1.65;color:#b9b4a8;max-width:250px;transition:opacity .6s">Double-click to open a pane. Drag to move it; drag a corner to resize. Double-click a pane for its pitch slider. Right-click removes it. Overlaps make their own tones. Click to remove these instructions.</div>
 <script>(function(){var h=document.getElementById("howto");h.addEventListener("pointerdown",function(e){e.stopPropagation();h.style.opacity="0";setTimeout(function(){h.remove()},700)});})();</script>
+<!-- live score player: ?score=<name> loads scores/<name>.json and plays it in-browser -->
+<script>if(new URLSearchParams(location.search).has("score")){var s=document.createElement("script");s.src="player.js";document.body.appendChild(s);}</script>
 </body>
 </html>

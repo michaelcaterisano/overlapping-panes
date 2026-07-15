@@ -556,17 +556,26 @@
           }
         }
 
-        // Remove unused composite oscillators
+        // Remove unused composite oscillators. Reaped in-frame, no setTimeout:
+        // a stale timeout's stop() on an already-stopped oscillator is a
+        // no-op (it does not throw), so its delete could remove the key's
+        // REPLACEMENT oscillator from the map -- orphaned at full gain,
+        // unstoppable. Heavy overlap churn (fast formation spins) leaked
+        // hundreds of droning voices that way.
         for (const key in appState.compositeOscillators) {
-          if (!(key in compositeRegions)) {
-            const oscillator = appState.compositeOscillators[key];
+          const oscillator = appState.compositeOscillators[key];
+          if (key in compositeRegions) {
+            oscillator.dyingSince = 0;
+          } else {
             oscillator.gain.gain.setTargetAtTime(0.0001, currentTime, 0.05);
-            setTimeout(() => {
+            if (!oscillator.dyingSince) {
+              oscillator.dyingSince = currentTime;
+            } else if (currentTime - oscillator.dyingSince > 0.12) {
               oscillator.osc.stop();
               oscillator.osc.disconnect();
               oscillator.gain.disconnect();
               delete appState.compositeOscillators[key];
-            }, OSCILLATOR_STOP_DELAY);
+            }
           }
         }
       }
